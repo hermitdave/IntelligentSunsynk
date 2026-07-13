@@ -15,28 +15,6 @@ describe('isInChargeSlot', () => {
     expect(isInChargeSlot(new Date('2026-01-02T20:00:00Z'), [slot])).toBe(true);
   });
 
-  describe('isOvernightTimerWindow', () => {
-    it('returns true exactly at 23:30', () => {
-      expect(isOvernightTimerWindow(new Date('2026-01-02T23:30:00'))).toBe(true);
-    });
-
-    it('returns true during the overnight lock window', () => {
-      expect(isOvernightTimerWindow(new Date('2026-01-03T02:15:00'))).toBe(true);
-    });
-
-    it('returns true before 05:30', () => {
-      expect(isOvernightTimerWindow(new Date('2026-01-03T05:29:00'))).toBe(true);
-    });
-
-    it('returns false exactly at 05:30', () => {
-      expect(isOvernightTimerWindow(new Date('2026-01-03T05:30:00'))).toBe(false);
-    });
-
-    it('returns false during daytime', () => {
-      expect(isOvernightTimerWindow(new Date('2026-01-03T12:00:00'))).toBe(false);
-    });
-  });
-
   it('returns true when now is inside the slot', () => {
     expect(isInChargeSlot(new Date('2026-01-02T20:45:00Z'), [slot])).toBe(true);
   });
@@ -70,5 +48,27 @@ describe('isInChargeSlot', () => {
   it('handles slots with timezone offset strings', () => {
     const tzSlot = makeSlot('2026-01-02T20:30:00+00:00', '2026-01-02T21:30:00+00:00');
     expect(isInChargeSlot(new Date('2026-01-02T21:00:00Z'), [tzSlot])).toBe(true);
+  });
+});
+
+describe('isOvernightTimerWindow', () => {
+  it('returns true exactly at 23:30', () => {
+    expect(isOvernightTimerWindow(new Date('2026-01-02T23:30:00'))).toBe(true);
+  });
+
+  it('returns true during the overnight lock window', () => {
+    expect(isOvernightTimerWindow(new Date('2026-01-03T02:15:00'))).toBe(true);
+  });
+
+  it('returns true before 05:30', () => {
+    expect(isOvernightTimerWindow(new Date('2026-01-03T05:29:00'))).toBe(true);
+  });
+
+  it('returns false exactly at 05:30', () => {
+    expect(isOvernightTimerWindow(new Date('2026-01-03T05:30:00'))).toBe(false);
+  });
+
+  it('returns false during daytime', () => {
+    expect(isOvernightTimerWindow(new Date('2026-01-03T12:00:00'))).toBe(false);
   });
 });

@@ -1,9 +1,22 @@
 import { render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChargeSlots } from '../components/ChargeSlots';
 import { DispatchSlot } from '../types';
 
+// Fixed reference time used throughout all tests
+const REF_TIME = new Date('2026-06-01T12:00:00Z');
+
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(REF_TIME);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 function futureSlot(offsetMinutes: number, durationMinutes = 30): DispatchSlot {
-  const start = new Date(Date.now() + offsetMinutes * 60_000);
+  const start = new Date(REF_TIME.getTime() + offsetMinutes * 60_000);
   const end = new Date(start.getTime() + durationMinutes * 60_000);
   return {
     start: start.toISOString(),
@@ -15,8 +28,9 @@ function futureSlot(offsetMinutes: number, durationMinutes = 30): DispatchSlot {
 }
 
 function activeSlot(): DispatchSlot {
-  const start = new Date(Date.now() - 5 * 60_000);  // started 5 min ago
-  const end = new Date(Date.now() + 25 * 60_000);   // ends in 25 min
+  // started 5 min before REF_TIME, ends 25 min after REF_TIME
+  const start = new Date(REF_TIME.getTime() - 5 * 60_000);
+  const end = new Date(REF_TIME.getTime() + 25 * 60_000);
   return {
     start: start.toISOString(),
     end: end.toISOString(),

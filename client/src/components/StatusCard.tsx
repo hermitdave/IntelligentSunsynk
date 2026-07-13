@@ -72,7 +72,7 @@ export function StatusCard({ state, onRefresh, isRefreshing }: StatusCardProps) 
         </div>
 
         <div className="status-item">
-          <span className="label">peakAndVallery</span>
+          <span className="label">Use Timer</span>
           <span className="value">{peakLabel}</span>
         </div>
 

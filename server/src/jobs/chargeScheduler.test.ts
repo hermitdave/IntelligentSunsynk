@@ -1,7 +1,7 @@
 /**
  * Unit tests for the charge scheduler core logic.
  */
-import { isInChargeSlot } from './chargeScheduler';
+import { isInChargeSlot, isOvernightTimerWindow } from './chargeScheduler';
 import { DispatchSlot } from '../types';
 
 function makeSlot(startIso: string, endIso: string): DispatchSlot {
@@ -13,6 +13,28 @@ describe('isInChargeSlot', () => {
 
   it('returns true when now is exactly at slot start', () => {
     expect(isInChargeSlot(new Date('2026-01-02T20:00:00Z'), [slot])).toBe(true);
+  });
+
+  describe('isOvernightTimerWindow', () => {
+    it('returns true exactly at 23:30', () => {
+      expect(isOvernightTimerWindow(new Date('2026-01-02T23:30:00'))).toBe(true);
+    });
+
+    it('returns true during the overnight lock window', () => {
+      expect(isOvernightTimerWindow(new Date('2026-01-03T02:15:00'))).toBe(true);
+    });
+
+    it('returns true before 05:30', () => {
+      expect(isOvernightTimerWindow(new Date('2026-01-03T05:29:00'))).toBe(true);
+    });
+
+    it('returns false exactly at 05:30', () => {
+      expect(isOvernightTimerWindow(new Date('2026-01-03T05:30:00'))).toBe(false);
+    });
+
+    it('returns false during daytime', () => {
+      expect(isOvernightTimerWindow(new Date('2026-01-03T12:00:00'))).toBe(false);
+    });
   });
 
   it('returns true when now is inside the slot', () => {

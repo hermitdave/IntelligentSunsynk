@@ -5,7 +5,7 @@ interface SettingsProps {
 }
 
 const KEY_DISPLAY_NAMES: Record<string, string> = {
-  peakAndVallery: 'Peak & Valley Mode',
+  peakAndVallery: 'Use Timer',
   sysWorkMode: 'System Work Mode',
   sdChargeOn: 'Grid Charge (sdChargeOn)',
   sellTime1: 'Slot 1 End Time',

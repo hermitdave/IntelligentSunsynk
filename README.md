@@ -8,7 +8,7 @@ When Octopus schedules your EV to charge from the grid during peak hours, your h
 
 1. **Fetches** upcoming Intelligent Go dispatch slots from the Octopus Energy GraphQL API.
 2. **Checks** every 5 minutes (configurable) whether the current time is within an active slot.
-3. **Sets** the inverter's `peakAndVallery` to `"0"` during a slot (disables peak/valley mode → battery stops trying to discharge) or `"1"` outside a slot (re-enables normal time-of-use operation).
+3. **Sets** the inverter's `peakAndVallery` ("Use Timer") to `"1"` from **23:30 to 05:30**, and outside that window sets `"0"` during an active slot (to prevent battery drain) or `"1"` when no slot is active.
 4. **Shows** a live dashboard with the current inverter state, all upcoming slots, and the settings snapshot.
 
 ## Architecture

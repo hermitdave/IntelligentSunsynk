@@ -6,11 +6,14 @@
  * Each tick:
  *  1. Fetches upcoming Intelligent Go dispatch slots from Octopus.
  *  2. Checks whether the current local time falls within any active slot.
- *  3. If inside a slot  → sets peakAndVallery = "0" (disable peak/valley to
+ *  3. Between 23:30 and 05:30 local time, always sets peakAndVallery = "1"
+ *     (Use Timer enabled).
+ *  4. If inside a slot outside that overnight window
+ *     → sets peakAndVallery = "0" (disable peak/valley to
  *                          prevent battery drain while EV charges from grid).
- *  4. If outside a slot → sets peakAndVallery = "1" (re-enable normal
+ *  5. If outside a slot → sets peakAndVallery = "1" (re-enable normal
  *                          peak/valley time-of-use operation).
- *  5. Only writes to the inverter when the value has changed.
+ *  6. Only writes to the inverter when the value has changed.
  */
 import cron from 'node-cron';
 import { Config } from '../config';
@@ -23,6 +26,8 @@ import { DispatchSlot } from '../types';
 const PEAK_VALLEY_CHARGING = '0';
 /** Value written to peakAndVallery when outside a charge slot. */
 const PEAK_VALLEY_NORMAL = '1';
+const OVERNIGHT_START_MINUTES = 23 * 60 + 30;
+const OVERNIGHT_END_MINUTES = 5 * 60 + 30;
 
 /**
  * Determine whether the given UTC datetime falls within any dispatch slot.
@@ -37,6 +42,14 @@ export function isInChargeSlot(now: Date, slots: DispatchSlot[]): boolean {
     const end = new Date(slot.end).getTime();
     return nowMs >= start && nowMs < end;
   });
+}
+
+/**
+ * 23:30 -> 05:30 (local time): lock to "1" (Use Timer enabled).
+ */
+export function isOvernightTimerWindow(now: Date): boolean {
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  return minutes >= OVERNIGHT_START_MINUTES || minutes < OVERNIGHT_END_MINUTES;
 }
 
 export async function runChargeCheck(
@@ -56,12 +69,16 @@ export async function runChargeCheck(
     const inSlot = isInChargeSlot(now, slots);
     appState.isInChargeSlot = inSlot;
 
-    const desiredValue = inSlot ? PEAK_VALLEY_CHARGING : PEAK_VALLEY_NORMAL;
+    const inOvernightWindow = isOvernightTimerWindow(now);
+    const desiredValue = inOvernightWindow
+      ? PEAK_VALLEY_NORMAL
+      : (inSlot ? PEAK_VALLEY_CHARGING : PEAK_VALLEY_NORMAL);
     const currentValue = appState.currentSettings?.peakAndVallery;
 
     console.log(
       '[Scheduler] Dispatch slots: ' + slots.length +
       ', In slot: ' + inSlot +
+      ', Overnight window: ' + inOvernightWindow +
       ', Desired peakAndVallery: ' + desiredValue +
       ', Current peakAndVallery: ' + (currentValue ?? 'unknown'),
     );

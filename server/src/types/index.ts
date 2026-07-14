@@ -49,17 +49,6 @@ export interface InverterSettings {
   [key: string]: string | undefined;
 }
 
-export interface SunsynkPlant {
-  id: number;
-  name: string;
-}
-
-export interface SunsynkInverter {
-  sn: string;
-  alias?: string;
-  plantId?: number;
-}
-
 // =============================================================================
 // OCTOPUS TYPES
 // =============================================================================

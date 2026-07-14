@@ -2,15 +2,21 @@
   "name": "intelligent-sunsynk",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "workspaces": [
     "server",
     "client"
   ],
   "scripts": {
+    "prestart": "node ./scripts/check-node-version.cjs",
     "start": "concurrently \"npm run start --workspace=server\" \"npm run start --workspace=client\"",
     "start:server": "npm run start --workspace=server",
     "start:client": "npm run start --workspace=client",
+    "prebuild": "node ./scripts/check-node-version.cjs",
     "build": "npm run build --workspace=server && npm run build --workspace=client",
+    "pretest": "node ./scripts/check-node-version.cjs",
     "test": "npm run test --workspace=server && npm run test --workspace=client"
   },
   "devDependencies": {

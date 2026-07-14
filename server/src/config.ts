@@ -3,24 +3,60 @@
  * Variable names match the reference repo (hermitdave/SunSynk-Octopus)
  * config.example.env for drop-in compatibility.
  */
-import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
+import dotenv from 'dotenv';
+
+function loadEnvFiles(): void {
+  const repoRootEnvPath = path.resolve(__dirname, '..', '..', '.env');
+  const cwdEnvPath = path.resolve(process.cwd(), '.env');
+
+  if (fs.existsSync(repoRootEnvPath)) {
+    dotenv.config({ path: repoRootEnvPath });
+  }
+
+  if (cwdEnvPath !== repoRootEnvPath && fs.existsSync(cwdEnvPath)) {
+    dotenv.config({ path: cwdEnvPath });
+  }
+}
+
+loadEnvFiles();
 
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    throw new Error(`Required environment variable ${name} is not set. See .env.example.`);
+    throw new Error(
+      `Required environment variable ${name} is not set. ` +
+      'Make sure it exists in the repo root .env file. See .env.example.'
+    );
   }
   return value;
+}
+
+function requireEnvUnless(name: string, skipWhen: boolean, reason: string): string {
+  const value = process.env[name];
+  if (!value && !skipWhen) {
+    throw new Error(
+      `Required environment variable ${name} is not set. ` +
+      `${reason} See .env.example.`
+    );
+  }
+  return value ?? '';
 }
 
 function optionalEnv(name: string, fallback = ''): string {
   return process.env[name] ?? fallback;
 }
 
+function optionalEnvTrimmed(name: string, fallback = ''): string {
+  return (process.env[name] ?? fallback).trim();
+}
+
 export interface Config {
   // Sunsynk OpenAPI credentials
   sunsynkApiKey: string;
   sunsynkApiSecret: string;
+  sunsynkAccessToken: string;
   // Sunsynk account credentials
   sunsynkUsername: string;
   sunsynkPassword: string;
@@ -46,11 +82,30 @@ export interface Config {
 }
 
 export function loadConfig(): Config {
+  const hasManualAccessToken = Boolean(process.env.SUNSYNK_ACCESS_TOKEN);
+
   return {
-    sunsynkApiKey: requireEnv('SUNSYNK_API_KEY'),
-    sunsynkApiSecret: requireEnv('SUNSYNK_API_SECRET'),
-    sunsynkUsername: requireEnv('SUNSYNK_USERNAME'),
-    sunsynkPassword: requireEnv('SUNSYNK_PASSWORD'),
+    sunsynkApiKey: requireEnvUnless(
+      'SUNSYNK_API_KEY',
+      hasManualAccessToken,
+      'It is required unless SUNSYNK_ACCESS_TOKEN is provided.'
+    ),
+    sunsynkApiSecret: requireEnvUnless(
+      'SUNSYNK_API_SECRET',
+      hasManualAccessToken,
+      'It is required unless SUNSYNK_ACCESS_TOKEN is provided.'
+    ),
+    sunsynkAccessToken: optionalEnvTrimmed('SUNSYNK_ACCESS_TOKEN'),
+    sunsynkUsername: requireEnvUnless(
+      'SUNSYNK_USERNAME',
+      hasManualAccessToken,
+      'It is required unless SUNSYNK_ACCESS_TOKEN is provided.'
+    ),
+    sunsynkPassword: requireEnvUnless(
+      'SUNSYNK_PASSWORD',
+      hasManualAccessToken,
+      'It is required unless SUNSYNK_ACCESS_TOKEN is provided.'
+    ),
     sunsynkSerial: requireEnv('SUNSYNK_SERIAL'),
     sunsynkPlantId: process.env.SUNSYNK_PLANT_ID
       ? parseInt(process.env.SUNSYNK_PLANT_ID, 10)

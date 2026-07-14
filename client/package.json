@@ -2,11 +2,18 @@
   "name": "intelligent-sunsynk-client",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": "24.x"
+  },
   "type": "module",
   "scripts": {
+    "prestart": "node ../scripts/check-node-version.cjs",
     "start": "vite",
+    "prebuild": "node ../scripts/check-node-version.cjs",
     "build": "tsc && vite build",
+    "prepreview": "node ../scripts/check-node-version.cjs",
     "preview": "vite preview",
+    "pretest": "node ../scripts/check-node-version.cjs",
     "test": "vitest run"
   },
   "dependencies": {

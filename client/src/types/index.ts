@@ -46,8 +46,37 @@ export interface ApiPlantOverviewResponse {
 export interface ApiPowerGraphResponse {
   plantId: number;
   date: string;
-  graph: Record<string, unknown>;
+  graph: PowerGraphSeries[];
 }
+
+export interface PowerGraphRecord {
+  time: string;
+  value: string;
+  updateTime: string | null;
+}
+
+export interface PowerGraphSeries {
+  unit: string;
+  records: PowerGraphRecord[];
+  id: string | null;
+  label: string;
+  sn: string | null;
+  groupCode: string | null;
+  name: string;
+  attribute: string | null;
+}
+
+export type PowerGraphLabel = 'PV' | 'Battery' | 'SOC' | 'Load' | 'Grid';
+
+export const POWER_GRAPH_LABELS: PowerGraphLabel[] = ['PV', 'Battery', 'SOC', 'Load', 'Grid'];
+
+export const POWER_GRAPH_COLOURS: Record<PowerGraphLabel, string> = {
+  PV: '#f59e0b',
+  Battery: '#22c55e',
+  SOC: '#3b82f6',
+  Load: '#ef4444',
+  Grid: '#8b5cf6',
+};
 
 export interface ApiEnergyFlowResponse {
   plantId: number;

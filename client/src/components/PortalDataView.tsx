@@ -1,19 +1,13 @@
+import { PowerGraphSeries } from '../types';
+import { PowerGraphChart } from './PowerGraphChart';
+
 interface PortalDataViewProps {
   selectedDate: string;
   onDateChange: (date: string) => void;
   onRefresh: () => void;
   isLoading: boolean;
   error: string | null;
-  energyFlow: Record<string, unknown> | null;
-  powerGraph: Record<string, unknown> | null;
-}
-
-function formatJson(data: Record<string, unknown> | null): string {
-  if (!data) {
-    return 'No data loaded yet.';
-  }
-
-  return JSON.stringify(data, null, 2);
+  powerGraph: PowerGraphSeries[] | null;
 }
 
 export function PortalDataView({
@@ -22,7 +16,6 @@ export function PortalDataView({
   onRefresh,
   isLoading,
   error,
-  energyFlow,
   powerGraph,
 }: PortalDataViewProps) {
   return (
@@ -54,14 +47,13 @@ export function PortalDataView({
       )}
 
       <div className="portal-grid">
-        <section>
-          <h3>Energy Flow</h3>
-          <pre className="json-box">{formatJson(energyFlow)}</pre>
-        </section>
-
         <section className="portal-full-width">
           <h3>Power Graph ({selectedDate})</h3>
-          <pre className="json-box">{formatJson(powerGraph)}</pre>
+          {powerGraph && powerGraph.length > 0 ? (
+            <PowerGraphChart data={powerGraph} />
+          ) : (
+            <p className="chart-empty">No data loaded yet.</p>
+          )}
         </section>
       </div>
     </div>

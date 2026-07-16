@@ -67,11 +67,6 @@ export interface Config {
   // Octopus Energy
   octopusApiKey: string;
   octopusAccountId: string;
-  octopusOffPeakRate: number;
-  octopusPeakRate: number;
-  // Battery (display only)
-  batteryCapacityKwh: number;
-  batteryMinSoc: number;
   // Web server
   webHost: string;
   webPort: number;
@@ -119,10 +114,6 @@ export function loadConfig(): Config {
     sunsynkVerifySsl: optionalEnv('SUNSYNK_VERIFY_SSL', 'false') === 'true',
     octopusApiKey: requireEnv('OCTOPUS_API_KEY'),
     octopusAccountId: requireEnv('OCTOPUS_ACCOUNT_ID'),
-    octopusOffPeakRate: parseFloat(optionalEnv('OCTOPUS_OFF_PEAK_RATE', '7.0')),
-    octopusPeakRate: parseFloat(optionalEnv('OCTOPUS_PEAK_RATE', '24.0')),
-    batteryCapacityKwh: parseFloat(optionalEnv('BATTERY_CAPACITY_KWH', '10.0')),
-    batteryMinSoc: parseInt(optionalEnv('BATTERY_MIN_SOC', '10'), 10),
     webHost: optionalEnv('WEB_HOST', '0.0.0.0'),
     webPort: parseInt(optionalEnv('WEB_PORT', '8080'), 10),
     cronSchedule: optionalEnv('CRON_SCHEDULE', '*/5 * * * *'),

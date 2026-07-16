@@ -95,10 +95,6 @@ npm run start:server     # Serves the API + built React app at http://localhost:
 | `SUNSYNK_VERIFY_SSL` | Optional | `true`/`false` (default `false`, recommended by SunSynk) |
 | `OCTOPUS_API_KEY` | ✅ | Octopus Energy REST API key |
 | `OCTOPUS_ACCOUNT_ID` | ✅ | Octopus account number (e.g. `A-XXXXXXXX`) |
-| `OCTOPUS_OFF_PEAK_RATE` | Optional | Off-peak rate in p/kWh (default `7.0`) |
-| `OCTOPUS_PEAK_RATE` | Optional | Peak rate in p/kWh (default `24.0`) |
-| `BATTERY_CAPACITY_KWH` | Optional | Battery size in kWh (default `10.0`, display only) |
-| `BATTERY_MIN_SOC` | Optional | Minimum SOC % (default `10`, display only) |
 | `WEB_HOST` | Optional | Server bind address (default `0.0.0.0`) |
 | `WEB_PORT` | Optional | Server port (default `8080`) |
 | `CRON_SCHEDULE` | Optional | Cron expression (default `*/5 * * * *`) |

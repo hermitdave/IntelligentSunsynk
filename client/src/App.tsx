@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState } from './types';
+import { AppState, PowerGraphSeries } from './types';
 import { fetchEnergyFlow, fetchPlantOverview, fetchPowerGraph, fetchStatus, triggerRefresh } from './services/api';
 import { StatusCard } from './components/StatusCard';
 import { LoadRechargeCard } from './components/LoadRechargeCard';
@@ -70,8 +70,7 @@ export default function App() {
   const [hasLoadedPortalData, setHasLoadedPortalData] = useState(false);
   const [dashboardOverview, setDashboardOverview] = useState<Record<string, unknown> | null>(null);
   const [dashboardFlow, setDashboardFlow] = useState<Record<string, unknown> | null>(null);
-  const [energyFlow, setEnergyFlow] = useState<Record<string, unknown> | null>(null);
-  const [powerGraph, setPowerGraph] = useState<Record<string, unknown> | null>(null);
+  const [powerGraph, setPowerGraph] = useState<PowerGraphSeries[] | null>(null);
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadStatus = useCallback(async () => {
@@ -93,12 +92,7 @@ export default function App() {
   const loadPortalData = useCallback(async (date: string) => {
     setIsPortalLoading(true);
     try {
-      const [flowData, graphData] = await Promise.all([
-        fetchEnergyFlow(),
-        fetchPowerGraph(date),
-      ]);
-
-      setEnergyFlow(flowData.flow);
+      const graphData = await fetchPowerGraph(date);
       setPowerGraph(graphData.graph);
       setPortalError(null);
     } catch (err) {
@@ -262,7 +256,6 @@ export default function App() {
             onRefresh={handlePortalRefresh}
             isLoading={isPortalLoading}
             error={portalError}
-            energyFlow={energyFlow}
             powerGraph={powerGraph}
           />
         )}

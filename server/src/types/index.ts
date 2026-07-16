@@ -59,10 +59,28 @@ export interface SunsynkPlantOverview {
 
 /**
  * Plant storage power graph payload from SunSynk Cloud.
- * The schema may evolve, so this is intentionally open-ended.
  */
 export interface SunsynkPowerGraph {
-  [key: string]: unknown;
+  plantId: number;
+  date: string;
+  graph: PowerGraphSeries[];
+}
+
+export interface PowerGraphRecord {
+  time: string;
+  value: string;
+  updateTime: string | null;
+}
+
+export interface PowerGraphSeries {
+  unit: string;
+  records: PowerGraphRecord[];
+  id: string | null;
+  label: string;
+  sn: string | null;
+  groupCode: string | null;
+  name: string;
+  attribute: string | null;
 }
 
 /**

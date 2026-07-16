@@ -62,7 +62,7 @@ export interface Config {
   sunsynkPassword: string;
   // Inverter identification
   sunsynkSerial: string;
-  sunsynkPlantId: number | null;
+  sunsynkPlantId: number;
   sunsynkVerifySsl: boolean;
   // Octopus Energy
   octopusApiKey: string;
@@ -83,6 +83,14 @@ export interface Config {
 
 export function loadConfig(): Config {
   const hasManualAccessToken = Boolean(process.env.SUNSYNK_ACCESS_TOKEN);
+  const plantIdRaw = requireEnv('SUNSYNK_PLANT_ID');
+  const plantId = parseInt(plantIdRaw, 10);
+  if (Number.isNaN(plantId)) {
+    throw new Error(
+      'Required environment variable SUNSYNK_PLANT_ID must be a valid integer. ' +
+      'Make sure it exists in the repo root .env file. See .env.example.'
+    );
+  }
 
   return {
     sunsynkApiKey: requireEnvUnless(
@@ -107,9 +115,7 @@ export function loadConfig(): Config {
       'It is required unless SUNSYNK_ACCESS_TOKEN is provided.'
     ),
     sunsynkSerial: requireEnv('SUNSYNK_SERIAL'),
-    sunsynkPlantId: process.env.SUNSYNK_PLANT_ID
-      ? parseInt(process.env.SUNSYNK_PLANT_ID, 10)
-      : null,
+    sunsynkPlantId: plantId,
     sunsynkVerifySsl: optionalEnv('SUNSYNK_VERIFY_SSL', 'false') === 'true',
     octopusApiKey: requireEnv('OCTOPUS_API_KEY'),
     octopusAccountId: requireEnv('OCTOPUS_ACCOUNT_ID'),

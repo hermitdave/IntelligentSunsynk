@@ -1,9 +1,12 @@
 import { AppState } from '../types';
-
 interface StatusCardProps {
   state: AppState;
   onRefresh: () => void;
   isRefreshing: boolean;
+  battPower: string;
+  gridOrMeterPower: string;
+  loadOrEpsPower: string;
+  soc: string;
 }
 
 function formatTime(isoString: string | null): string {
@@ -11,7 +14,7 @@ function formatTime(isoString: string | null): string {
   return new Date(isoString).toLocaleString();
 }
 
-function ModeBadge({ mode }: { mode: AppState['controlMode'] }) {
+function ModeBadge({ mode, soc }: { mode: AppState['controlMode']; soc: string }) {
   const colours: Record<AppState['controlMode'], string> = {
     charging: '#22c55e',
     discharging: '#f59e0b',
@@ -22,6 +25,8 @@ function ModeBadge({ mode }: { mode: AppState['controlMode'] }) {
     discharging: '🔋 Discharging',
     unknown: '❓ Unknown',
   };
+  const socText = soc.endsWith('%') ? soc : soc + '%';
+  const suffix = soc !== '—' ? ' - ' + socText : '';
   return (
     <span
       style={{
@@ -34,25 +39,25 @@ function ModeBadge({ mode }: { mode: AppState['controlMode'] }) {
         fontSize: 14,
       }}
     >
-      {labels[mode]}
+      {labels[mode] + suffix}
     </span>
   );
 }
 
-function getPeakValleyLabel(value: string): string {
-  if (value === '0') return 'Disabled (charging mode)';
-  if (value === '1') return 'Enabled (normal)';
-  return '—';
-}
-
-export function StatusCard({ state, onRefresh, isRefreshing }: StatusCardProps) {
-  const peakAndVallery = state.currentSettings?.peakAndVallery ?? '—';
-  const peakLabel = getPeakValleyLabel(peakAndVallery);
-
+export function StatusCard({
+  state,
+  onRefresh,
+  isRefreshing,
+  battPower,
+  gridOrMeterPower,
+  loadOrEpsPower,
+  soc,
+}: StatusCardProps) {
   return (
     <div className="card">
       <div className="card-header">
         <h2>Current Status</h2>
+        <h6>{formatTime(state.lastUpdated)}</h6>
         <button className="btn-refresh" onClick={onRefresh} disabled={isRefreshing}>
           {isRefreshing ? 'Refreshing…' : '↻ Refresh'}
         </button>
@@ -61,46 +66,22 @@ export function StatusCard({ state, onRefresh, isRefreshing }: StatusCardProps) 
       <div className="status-grid">
         <div className="status-item">
           <span className="label">Control Mode</span>
-          <ModeBadge mode={state.controlMode} />
+          <ModeBadge mode={state.controlMode} soc={soc} />
         </div>
 
         <div className="status-item">
-          <span className="label">In Charge Slot</span>
-          <span className={state.isInChargeSlot ? 'value-yes' : 'value-no'}>
-            {state.isInChargeSlot ? 'Yes' : 'No'}
-          </span>
+          <span className="label">Load</span>
+          <span className="value">{loadOrEpsPower}W</span>
         </div>
 
         <div className="status-item">
-          <span className="label">Use Timer</span>
-          <span className="value">{peakLabel}</span>
+          <span className="label">Battery Power</span>
+          <span className="value">{battPower}W</span>
         </div>
 
         <div className="status-item">
-          <span className="label">Inverter Serial</span>
-          <span className="value mono">{state.inverterSerial ?? '—'}</span>
-        </div>
-
-        <div className="status-item">
-          <span className="label">Plant ID</span>
-          <span className="value">{state.plantId ?? '—'}</span>
-        </div>
-
-        <div className="status-item">
-          <span className="label">API Authenticated</span>
-          <span className={state.isAuthenticated ? 'value-yes' : 'value-no'}>
-            {state.isAuthenticated ? 'Yes' : 'No'}
-          </span>
-        </div>
-
-        <div className="status-item">
-          <span className="label">Scheduler Runs</span>
-          <span className="value">{state.runCount}</span>
-        </div>
-
-        <div className="status-item">
-          <span className="label">Last Updated</span>
-          <span className="value">{formatTime(state.lastUpdated)}</span>
+          <span className="label">Grid Power</span>
+          <span className="value">{gridOrMeterPower}W</span>
         </div>
       </div>
 

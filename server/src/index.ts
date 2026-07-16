@@ -48,8 +48,7 @@ async function main() {
   appState.inverterSerial = serial;
   appState.plantId = config.sunsynkPlantId;
   console.log(
-    '[Server] Using configured inverter serial: ' + serial +
-    (config.sunsynkPlantId ? ', plantId: ' + config.sunsynkPlantId : ', plantId: not configured')
+    '[Server] Using configured inverter serial: ' + serial + ', plantId: ' + config.sunsynkPlantId
   );
 
   // -------------------------------------------------------------------------

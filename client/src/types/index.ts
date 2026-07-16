@@ -37,3 +37,19 @@ export interface ApiSettingsResponse {
   saved: Record<string, string> | null;
   current: Record<string, string> | null;
 }
+
+export interface ApiPlantOverviewResponse {
+  plantId: number;
+  overview: Record<string, unknown>;
+}
+
+export interface ApiPowerGraphResponse {
+  plantId: number;
+  date: string;
+  graph: Record<string, unknown>;
+}
+
+export interface ApiEnergyFlowResponse {
+  plantId: number;
+  flow: Record<string, unknown>;
+}

@@ -13,10 +13,17 @@ import axios, { AxiosInstance } from 'axios';
 import * as crypto from 'crypto';
 import * as https from 'https';
 import { Config } from '../config';
-import { InverterSettings, SunsynkToken } from '../types';
+import {
+  InverterSettings,
+  SunsynkEnergyFlow,
+  SunsynkPlantOverview,
+  SunsynkPowerGraph,
+  SunsynkToken,
+} from '../types';
 
 const OPENAPI_AUTH_URL = 'https://openapi.sunsynk.net';
 const API_DATA_URL = 'https://api.sunsynk.net';
+const APP_PORTAL_URL = 'https://app.sunsynk.net';
 
 /**
  * Subset of settings this app is allowed to write.
@@ -36,6 +43,7 @@ const ALLOWED_WRITE_SETTINGS = new Set([
 export class SunsynkService {
   private config: Config;
   private client: AxiosInstance;
+  private portalClient: AxiosInstance;
   private authClient: AxiosInstance;
   private accessToken: string | null = null;
   private tokenExpiresAt: Date | null = null;
@@ -51,6 +59,11 @@ export class SunsynkService {
     console.log('[SunsynkAuth][DEBUG] ' + message + payload);
   }
 
+  private portalDebug(message: string, meta?: Record<string, unknown>): void {
+    const payload = meta ? ' ' + JSON.stringify(meta) : '';
+    console.log('[SunsynkPortal][DEBUG] ' + message + payload);
+  }
+
   constructor(config: Config) {
     this.config = config;
     const httpsAgent = new https.Agent({
@@ -63,11 +76,110 @@ export class SunsynkService {
       httpsAgent,
     });
 
+    this.portalClient = axios.create({
+      baseURL: APP_PORTAL_URL,
+      timeout: 30_000,
+      httpsAgent,
+    });
+
     this.authClient = axios.create({
       baseURL: OPENAPI_AUTH_URL,
       timeout: 30_000,
       httpsAgent,
     });
+  }
+
+  /** Make an authenticated request to app.sunsynk.net portal endpoints. */
+  private async requestPortal<T = unknown>(
+    method: 'GET' | 'POST',
+    endpoint: string,
+    data?: Record<string, unknown>,
+    params?: Record<string, unknown>,
+  ): Promise<T> {
+    await this.authenticate();
+
+    this.portalDebug('Request start', {
+      method,
+      endpoint,
+      params: params ?? null,
+    });
+
+    const requestHeaders: Record<string, string> = {
+      Authorization: this.authHeader(),
+      Accept: 'application/json',
+      'Accept-Language': 'en-GB,en;q=0.9',
+      'User-Agent': 'IntelligentSunsynk/1.0',
+    };
+
+    if (data) {
+      requestHeaders['Content-Type'] = 'application/json';
+    }
+
+    let response;
+    try {
+      response = await this.portalClient.request<
+        | { code?: number; msg?: string; data?: T }
+        | T
+      >({
+        method,
+        url: endpoint,
+        headers: requestHeaders,
+        params,
+        data,
+      });
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        this.portalDebug('Request failed', {
+          method,
+          endpoint,
+          params: params ?? null,
+          status: err.response?.status,
+          statusText: err.response?.statusText,
+          responseData: err.response?.data,
+          code: err.code,
+          message: err.message,
+        });
+      } else {
+        this.portalDebug('Request failed with non-axios error', {
+          method,
+          endpoint,
+          params: params ?? null,
+          error: String(err),
+        });
+      }
+      throw err;
+    }
+
+    this.portalDebug('Request success', {
+      method,
+      endpoint,
+      params: params ?? null,
+      status: response.status,
+    });
+
+    if (response.status === 401) {
+      this.accessToken = null;
+      this.tokenExpiresAt = null;
+      return this.requestPortal<T>(method, endpoint, data, params);
+    }
+
+    const payload = response.data;
+    if (
+      payload &&
+      typeof payload === 'object' &&
+      !Array.isArray(payload) &&
+      'code' in payload
+    ) {
+      const wrapped = payload as { code?: number; msg?: string; data?: T };
+      if (typeof wrapped.code === 'number' && wrapped.code !== 0) {
+        throw new Error('SunSynk portal API error [' + wrapped.code + ']: ' + (wrapped.msg ?? 'Unknown error'));
+      }
+      if ('data' in wrapped) {
+        return wrapped.data as T;
+      }
+    }
+
+    return payload as T;
   }
 
   // ===========================================================================
@@ -314,5 +426,56 @@ export class SunsynkService {
     }
 
     await this.request('POST', '/api/v1/common/setting/' + serial + '/set', safeSettings);
+  }
+
+  /** Read current plant overview data. */
+  async getPlantOverview(plantId: number): Promise<SunsynkPlantOverview> {
+    const endpoint = '/api/v2/plant/' + plantId + '/overview';
+    this.portalDebug('Fetching plant overview', { plantId, endpoint });
+    try {
+      const overview = await this.requestPortal<SunsynkPlantOverview>('GET', endpoint);
+      this.portalDebug('Plant overview fetched', {
+        plantId,
+        topLevelKeys: Object.keys(overview ?? {}).slice(0, 20),
+      });
+      return overview;
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        this.portalDebug('Plant overview fetch failed', {
+          plantId,
+          endpoint,
+          status: err.response?.status,
+          statusText: err.response?.statusText,
+          responseData: err.response?.data,
+          message: err.message,
+        });
+      } else {
+        this.portalDebug('Plant overview fetch failed with non-axios error', {
+          plantId,
+          endpoint,
+          error: String(err),
+        });
+      }
+      throw err;
+    }
+  }
+
+  /** Read plant storage power graph data for a specific date. */
+  async getPlantPowerGraph(
+    plantId: number,
+    date: string,
+    language = 'en',
+  ): Promise<SunsynkPowerGraph> {
+    return this.requestPortal<SunsynkPowerGraph>(
+      'GET',
+      '/api/v2/plant/' + plantId + '/storage/power',
+      undefined,
+      { date, id: plantId, language },
+    );
+  }
+
+  /** Read current plant energy flow data. */
+  async getPlantEnergyFlow(plantId: number): Promise<SunsynkEnergyFlow> {
+    return this.requestPortal<SunsynkEnergyFlow>('GET', '/api/v2/plant/' + plantId + '/energy/flow');
   }
 }

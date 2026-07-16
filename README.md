@@ -91,7 +91,7 @@ npm run start:server     # Serves the API + built React app at http://localhost:
 | `SUNSYNK_USERNAME` | Conditionally required | SunSynk account email; required unless `SUNSYNK_ACCESS_TOKEN` is set |
 | `SUNSYNK_PASSWORD` | Conditionally required | SunSynk account password; required unless `SUNSYNK_ACCESS_TOKEN` is set |
 | `SUNSYNK_SERIAL` | ✅ | Inverter serial number |
-| `SUNSYNK_PLANT_ID` | Optional | Plant ID (auto-detected if omitted) |
+| `SUNSYNK_PLANT_ID` | ✅ | Plant ID |
 | `SUNSYNK_VERIFY_SSL` | Optional | `true`/`false` (default `false`, recommended by SunSynk) |
 | `OCTOPUS_API_KEY` | ✅ | Octopus Energy REST API key |
 | `OCTOPUS_ACCOUNT_ID` | ✅ | Octopus account number (e.g. `A-XXXXXXXX`) |
@@ -122,6 +122,9 @@ When `SUNSYNK_ACCESS_TOKEN` is set, the app uses that token directly and skips t
 | `GET` | `/api/status` | Full application state (auth, slots, settings, errors) |
 | `GET` | `/api/charge-slots` | Current dispatch slots + active flag |
 | `GET` | `/api/settings` | Saved (startup) and current inverter settings |
+| `GET` | `/api/plant-overview` | Current SunSynk plant overview payload (`/api/v2/plant/{plantId}/overview`) |
+| `GET` | `/api/power-graph?date=YYYY-MM-DD` | Plant storage power graph (`/api/v2/plant/{plantId}/storage/power`) |
+| `GET` | `/api/energy-flow` | Current plant energy flow (`/api/v2/plant/{plantId}/energy/flow`) |
 | `POST` | `/api/refresh` | Force an immediate scheduler run |
 
 ## Safety

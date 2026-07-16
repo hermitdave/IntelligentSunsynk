@@ -49,6 +49,30 @@ export interface InverterSettings {
   [key: string]: string | undefined;
 }
 
+/**
+ * Plant overview payload from SunSynk Cloud.
+ * The schema may evolve, so this is intentionally open-ended.
+ */
+export interface SunsynkPlantOverview {
+  [key: string]: unknown;
+}
+
+/**
+ * Plant storage power graph payload from SunSynk Cloud.
+ * The schema may evolve, so this is intentionally open-ended.
+ */
+export interface SunsynkPowerGraph {
+  [key: string]: unknown;
+}
+
+/**
+ * Plant energy flow payload from SunSynk Cloud.
+ * The schema may evolve, so this is intentionally open-ended.
+ */
+export interface SunsynkEnergyFlow {
+  [key: string]: unknown;
+}
+
 // =============================================================================
 // OCTOPUS TYPES
 // =============================================================================

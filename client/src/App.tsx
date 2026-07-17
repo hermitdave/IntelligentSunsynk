@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState, PowerGraphSeries } from './types';
-import { fetchEnergyFlow, fetchPlantOverview, fetchPowerGraph, fetchStatus, triggerRefresh } from './services/api';
+import { AppState, PowerGraphSeries, SlotHistory } from './types';
+import { fetchEnergyFlow, fetchPlantOverview, fetchPowerGraph, fetchSlotHistory, fetchStatus, triggerRefresh } from './services/api';
 import { StatusCard } from './components/StatusCard';
 import { LoadRechargeCard } from './components/LoadRechargeCard';
 import { IOGCard } from './components/IOGCard';
@@ -71,18 +71,21 @@ export default function App() {
   const [dashboardOverview, setDashboardOverview] = useState<Record<string, unknown> | null>(null);
   const [dashboardFlow, setDashboardFlow] = useState<Record<string, unknown> | null>(null);
   const [powerGraph, setPowerGraph] = useState<PowerGraphSeries[] | null>(null);
+  const [slotHistory, setSlotHistory] = useState<SlotHistory | null>(null);
   const pollerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadStatus = useCallback(async () => {
     try {
-      const [data, overviewData, flowData] = await Promise.all([
+      const [data, overviewData, flowData, historyData] = await Promise.all([
         fetchStatus(),
         fetchPlantOverview(),
         fetchEnergyFlow(),
+        fetchSlotHistory(),
       ]);
       setState(data);
       setDashboardOverview(overviewData.overview);
       setDashboardFlow(flowData.flow);
+      setSlotHistory(historyData);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to connect to server');
@@ -109,14 +112,16 @@ export default function App() {
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const [data, overviewData, flowData] = await Promise.all([
+      const [data, overviewData, flowData, historyData] = await Promise.all([
         triggerRefresh(),
         fetchPlantOverview(),
         fetchEnergyFlow(),
+        fetchSlotHistory(),
       ]);
       setState(data);
       setDashboardOverview(overviewData.overview);
       setDashboardFlow(flowData.flow);
+      setSlotHistory(historyData);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Refresh failed');
@@ -242,7 +247,7 @@ export default function App() {
         )}
 
         {state && activeTab === 'slots' && (
-          <ChargeSlots slots={state.chargeSlots} isInChargeSlot={state.isInChargeSlot} />
+          <ChargeSlots slots={state.chargeSlots} isInChargeSlot={state.isInChargeSlot} slotHistory={slotHistory ?? undefined} />
         )}
 
         {state && activeTab === 'settings' && (

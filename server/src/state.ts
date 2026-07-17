@@ -14,6 +14,12 @@ export const appState: AppState = {
   currentSettings: null,
   chargeSlots: [],
   isInChargeSlot: false,
+  slotHistory: {
+    fulfilled: [],
+    futurePlanned: [],
+    active: [],
+    removed: [],
+  },
   controlMode: 'unknown',
   lastUpdated: null,
   lastError: null,

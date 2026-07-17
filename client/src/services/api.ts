@@ -9,6 +9,7 @@ import {
   ApiPlantOverviewResponse,
   ApiPowerGraphResponse,
   ApiSettingsResponse,
+  ApiSlotHistoryResponse,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api', timeout: 15_000 });
@@ -46,4 +47,9 @@ export async function fetchEnergyFlow(): Promise<ApiEnergyFlowResponse> {
 export async function triggerRefresh(): Promise<AppState> {
   const { data } = await api.post<{ ok: boolean; state: AppState }>('/refresh');
   return data.state;
+}
+
+export async function fetchSlotHistory(): Promise<ApiSlotHistoryResponse> {
+  const { data } = await api.get<ApiSlotHistoryResponse>('/slot-history');
+  return data;
 }

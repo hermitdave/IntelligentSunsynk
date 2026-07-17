@@ -1,8 +1,9 @@
-import { DispatchSlot } from '../types';
+import { DispatchSlot, SlotHistory, TrackedSlot } from '../types';
 
 interface ChargeSlotsProps {
   slots: DispatchSlot[];
   isInChargeSlot: boolean;
+  slotHistory?: SlotHistory;
 }
 
 function formatDateTime(isoString: string): string {
@@ -28,7 +29,51 @@ function isSlotPast(slot: DispatchSlot): boolean {
   return Date.now() >= new Date(slot.end).getTime();
 }
 
-export function ChargeSlots({ slots, isInChargeSlot }: ChargeSlotsProps) {
+function SlotRow({ slot, statusLabel, badgeClass }: { slot: TrackedSlot; statusLabel: string; badgeClass: string }) {
+  return (
+    <tr>
+      <td><span className={badgeClass}>{statusLabel}</span></td>
+      <td>{formatDateTime(slot.start)}</td>
+      <td>{formatDateTime(slot.end)}</td>
+      <td>{durationMinutes(slot.start, slot.end)} min</td>
+      <td className="mono">{slot.source}</td>
+      <td>{slot.deltaKwh !== 0 ? slot.deltaKwh.toFixed(2) : '—'}</td>
+    </tr>
+  );
+}
+
+function SlotSection({ title, slots, badgeClass, statusLabel }: {
+  title: string;
+  slots: TrackedSlot[];
+  badgeClass: string;
+  statusLabel: string;
+}) {
+  if (slots.length === 0) return null;
+  return (
+    <div className="slot-section">
+      <h3>{title}</h3>
+      <table className="slots-table slots-table-sm">
+        <thead>
+          <tr>
+            <th>Status</th>
+            <th>Start</th>
+            <th>End</th>
+            <th>Duration</th>
+            <th>Source</th>
+            <th>Energy (kWh)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {slots.map((slot, idx) => (
+            <SlotRow key={slot.fingerprint || idx} slot={slot} statusLabel={statusLabel} badgeClass={badgeClass} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function ChargeSlots({ slots, isInChargeSlot, slotHistory }: ChargeSlotsProps) {
   const sorted = [...slots].sort(
     (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
   );
@@ -42,9 +87,44 @@ export function ChargeSlots({ slots, isInChargeSlot }: ChargeSlotsProps) {
         )}
       </div>
 
-      {sorted.length === 0 ? (
+      {slotHistory && (
+        <div className="slot-history">
+          <SlotSection
+            title="✅ Fulfilled Slots"
+            slots={slotHistory.fulfilled}
+            badgeClass="badge-fulfilled"
+            statusLabel="Fulfilled"
+          />
+          <SlotSection
+            title="📅 Yesterday's Slots"
+            slots={slotHistory.yesterday}
+            badgeClass="badge-past"
+            statusLabel="Yesterday"
+          />
+          <SlotSection
+            title="⚡ Currently Active"
+            slots={slotHistory.active}
+            badgeClass="badge-active-small"
+            statusLabel="Active"
+          />
+          <SlotSection
+            title="📆 Upcoming Planned Slots"
+            slots={slotHistory.futurePlanned}
+            badgeClass="badge-upcoming"
+            statusLabel="Upcoming"
+          />
+          <SlotSection
+            title="❌ Removed Slots"
+            slots={slotHistory.removed}
+            badgeClass="badge-removed"
+            statusLabel="Removed"
+          />
+        </div>
+      )}
+
+      {sorted.length === 0 && !slotHistory ? (
         <p className="empty-message">No upcoming dispatch slots found from Octopus.</p>
-      ) : (
+      ) : sorted.length === 0 ? null : (
         <div className="table-wrapper">
           <table className="slots-table">
             <thead>

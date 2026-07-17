@@ -19,6 +19,7 @@ import cron from 'node-cron';
 import { Config } from '../config';
 import { SunsynkService } from '../services/sunsynk';
 import { OctopusService } from '../services/octopus';
+import { loadSlotHistory, mergeSlots, saveSlotHistory } from '../services/slotHistory';
 import { appState } from '../state';
 import { DispatchSlot } from '../types';
 
@@ -98,6 +99,13 @@ export async function runChargeCheck(
     const inSlot = isInChargeSlot(now, slots);
     appState.isInChargeSlot = inSlot;
 
+    // --- Step 2b: Merge slots into persisted history ---
+    // Only slots observed as active (isInChargeSlot === true) will be
+    // promoted to fulfilled once their end time passes.
+    const nowIso = now.toISOString();
+    appState.slotHistory = mergeSlots(slots, appState.slotHistory, nowIso, inSlot);
+    saveSlotHistory(appState.slotHistory);
+
     const inOvernightWindow = isOvernightTimerWindow(now);
     const desiredValue = inOvernightWindow
       ? PEAK_VALLEY_NORMAL
@@ -162,6 +170,15 @@ export function startScheduler(
 ): void {
   const schedule = config.cronSchedule;
   schedulerLog('Starting with schedule: ' + schedule);
+
+  // Load persisted slot history so fulfilled slots survive restarts
+  appState.slotHistory = loadSlotHistory();
+  schedulerLog(
+    'Loaded slot history: ' +
+    appState.slotHistory.fulfilled.length + ' fulfilled, ' +
+    appState.slotHistory.active.length + ' active, ' +
+    appState.slotHistory.futurePlanned.length + ' future planned',
+  );
 
   // Immediate first run
   runChargeCheck(sunsynk, octopus, serial).catch((err) =>

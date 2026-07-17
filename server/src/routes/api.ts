@@ -6,6 +6,7 @@ import { appState } from '../state';
 import { SunsynkService } from '../services/sunsynk';
 import { OctopusService } from '../services/octopus';
 import { runChargeCheck } from '../jobs/chargeScheduler';
+import { yesterdaySlots } from '../services/slotHistory';
 
 export function createRouter(
   sunsynk: SunsynkService,
@@ -22,6 +23,18 @@ export function createRouter(
   /** GET /api/charge-slots – current Octopus dispatch slots */
   router.get('/charge-slots', (_req: Request, res: Response) => {
     res.json({ slots: appState.chargeSlots, isInChargeSlot: appState.isInChargeSlot });
+  });
+
+  /** GET /api/slot-history – persisted charge slot history */
+  router.get('/slot-history', (_req: Request, res: Response) => {
+    const nowIso = new Date().toISOString();
+    res.json({
+      fulfilled: appState.slotHistory.fulfilled,
+      yesterday: yesterdaySlots(appState.slotHistory, nowIso),
+      active: appState.slotHistory.active,
+      futurePlanned: appState.slotHistory.futurePlanned,
+      removed: appState.slotHistory.removed,
+    });
   });
 
   /** GET /api/settings – saved (startup) and current inverter settings */

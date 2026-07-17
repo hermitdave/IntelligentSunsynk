@@ -264,6 +264,57 @@ body {
   font-weight: 600;
 }
 
+.badge-fulfilled {
+  background: #8b5cf6;
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge-removed {
+  background: #ef4444;
+  color: #fff;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ============================================================
+   Slot History
+   ============================================================ */
+
+.slot-history {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.slot-section {
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.slot-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+
+.slots-table-sm {
+  font-size: 13px;
+}
+
+.slots-table-sm th,
+.slots-table-sm td {
+  padding: 6px 10px;
+}
+
 /* ============================================================
    Refresh button
    ============================================================ */

@@ -10,6 +10,23 @@ export interface DispatchSlot {
   location: string | null;
 }
 
+export type SlotStatus = 'upcoming' | 'active' | 'fulfilled' | 'removed';
+
+export interface TrackedSlot extends DispatchSlot {
+  fingerprint: string;
+  status: SlotStatus;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export interface SlotHistory {
+  fulfilled: TrackedSlot[];
+  yesterday: TrackedSlot[];
+  active: TrackedSlot[];
+  futurePlanned: TrackedSlot[];
+  removed: TrackedSlot[];
+}
+
 export type ControlMode = 'charging' | 'discharging' | 'unknown';
 
 export interface AppState {
@@ -32,6 +49,8 @@ export interface ApiChargeSlotsResponse {
   slots: DispatchSlot[];
   isInChargeSlot: boolean;
 }
+
+export interface ApiSlotHistoryResponse extends SlotHistory {}
 
 export interface ApiSettingsResponse {
   saved: Record<string, string> | null;

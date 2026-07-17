@@ -53,11 +53,8 @@ function optionalEnvTrimmed(name: string, fallback = ''): string {
 }
 
 export interface Config {
-  // Sunsynk OpenAPI credentials
-  sunsynkApiKey: string;
-  sunsynkApiSecret: string;
-  sunsynkAccessToken: string;
   // Sunsynk account credentials
+  sunsynkAccessToken: string;
   sunsynkUsername: string;
   sunsynkPassword: string;
   // Inverter identification
@@ -88,16 +85,6 @@ export function loadConfig(): Config {
   }
 
   return {
-    sunsynkApiKey: requireEnvUnless(
-      'SUNSYNK_API_KEY',
-      hasManualAccessToken,
-      'It is required unless SUNSYNK_ACCESS_TOKEN is provided.'
-    ),
-    sunsynkApiSecret: requireEnvUnless(
-      'SUNSYNK_API_SECRET',
-      hasManualAccessToken,
-      'It is required unless SUNSYNK_ACCESS_TOKEN is provided.'
-    ),
     sunsynkAccessToken: optionalEnvTrimmed('SUNSYNK_ACCESS_TOKEN'),
     sunsynkUsername: requireEnvUnless(
       'SUNSYNK_USERNAME',

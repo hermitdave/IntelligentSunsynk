@@ -1,8 +1,11 @@
 /**
  * SunSynk Cloud API service.
  *
- * Authentication: POST https://openapi.sunsynk.net/oauth/token
- *   Uses HMAC-SHA256 signed request with api_key + api_secret.
+ * Authentication (csp-web browser flow, mirrors api.sunsynk.net/login):
+ *   1. GET  https://api.sunsynk.net/anonymous/publicKey  -> RSA public key
+ *   2. POST https://api.sunsynk.net/oauth/token/new       -> access token
+ *   The password is RSA (PKCS#1 v1.5) encrypted with the fetched public key,
+ *   and each request carries a millisecond `nonce` + hex-MD5 `sign`.
  *
  * Data / Control: https://api.sunsynk.net
  *   All endpoints use a bearer token obtained during auth.
@@ -21,7 +24,6 @@ import {
   SunsynkToken,
 } from '../types';
 
-const OPENAPI_AUTH_URL = 'https://openapi.sunsynk.net';
 const API_DATA_URL = 'https://api.sunsynk.net';
 const APP_PORTAL_URL = 'https://app.sunsynk.net';
 
@@ -83,7 +85,7 @@ export class SunsynkService {
     });
 
     this.authClient = axios.create({
-      baseURL: OPENAPI_AUTH_URL,
+      baseURL: API_DATA_URL,
       timeout: 30_000,
       httpsAgent,
     });
@@ -186,79 +188,102 @@ export class SunsynkService {
   // Authentication
   // ===========================================================================
 
+  /** Hex-encoded MD5 digest, as used by the SunSynk `sign` request parameter. */
+  private md5Hex(data: string): string {
+    return crypto.createHash('md5').update(data, 'utf8').digest('hex');
+  }
+
+  /** The `source` identifier the api.sunsynk.net web portal sends. */
+  private readonly authSource = 'sunsynk';
+
   /**
-   * Compute the standard HTTP Content-MD5 header value for a request body.
+   * Fetch the RSA public key used to encrypt the password.
    *
-   * This is NOT a password hash — it is a request-body integrity checksum
-   * required by the SunSynk OpenAPI signature scheme (per their documentation).
-   * The security of the authentication comes from the HMAC-SHA256 signature
-   * computed in `calcSignature`, not from this checksum.
+   * Mirrors the browser flow: GET /anonymous/publicKey with a millisecond
+   * `nonce` and a hex-MD5 `sign` of `nonce=<n>&source=<src>` + "POWER_VIEW".
+   * Returns the base64 DER (X.509 SubjectPublicKeyInfo) public key string.
    */
-  private calcMd5(data: string): string {
-    if (!data) return '';
-    return crypto.createHash('md5').update(data, 'utf8').digest('base64');
+  private async fetchPublicKey(): Promise<string> {
+    const nonce = Date.now();
+    const base = `nonce=${nonce}&source=${this.authSource}`;
+    const sign = this.md5Hex(base + 'POWER_VIEW');
+    const url = `/anonymous/publicKey?${base}&sign=${sign}`;
+
+    const response = await this.authClient.get<{ code: number; msg: string; data: string }>(url, {
+      headers: { accept: 'application/json' },
+    });
+
+    if (response.data.code !== 0 || !response.data.data) {
+      throw new Error('SunSynk publicKey fetch failed: ' + (response.data.msg || 'Unknown error'));
+    }
+
+    this.authDebug('Fetched OpenAPI public key', {
+      nonce,
+      keyLength: response.data.data.length,
+      keyPreview: this.mask(response.data.data, 10, 0),
+    });
+
+    return response.data.data;
   }
 
   /**
-   * Build the OpenAPI auth request exactly as described in SunSynk's support
-   * article. The signature logic intentionally mirrors their browser example.
+   * RSA-encrypt the password with the fetched public key (PKCS#1 v1.5 padding,
+   * matching JSEncrypt in the browser) and return a base64 string.
    */
-  private buildAuthRequest(): {
+  private encryptPassword(password: string, publicKeyBase64: string): string {
+    const keyObject = crypto.createPublicKey({
+      key: Buffer.from(publicKeyBase64, 'base64'),
+      format: 'der',
+      type: 'spki',
+    });
+    return crypto
+      .publicEncrypt(
+        { key: keyObject, padding: crypto.constants.RSA_PKCS1_PADDING },
+        Buffer.from(password, 'utf8'),
+      )
+      .toString('base64');
+  }
+
+  /**
+   * Build the csp-web auth request exactly as the api.sunsynk.net login page
+   * does: fetch the RSA public key, encrypt the password, then sign the token
+   * request with a fresh millisecond `nonce` + hex-MD5 `sign` of
+   * `nonce=<n>&source=<src>` + the first 10 chars of the public key.
+   */
+  private async buildAuthRequest(): Promise<{
     path: string;
     bodyStr: string;
     headers: Record<string, string>;
-  } {
-    const path = '/oauth/token';
+  }> {
+    const publicKey = await this.fetchPublicKey();
+
+    const nonce = Date.now();
+    const base = `nonce=${nonce}&source=${this.authSource}`;
+    const sign = this.md5Hex(base + publicKey.substring(0, 10));
+    const encryptedPassword = this.encryptPassword(this.config.sunsynkPassword, publicKey);
+
+    const path = '/oauth/token/new';
     const bodyStr = JSON.stringify({
+      sign,
+      nonce,
       username: this.config.sunsynkUsername,
-      password: this.config.sunsynkPassword,
+      password: encryptedPassword,
       grant_type: 'password',
-      client_id: 'openapi',
+      client_id: 'csp-web',
+      source: this.authSource,
     });
-    const nonce = crypto.randomUUID();
-    const md5 = this.calcMd5(bodyStr);
 
     const headers: Record<string, string> = {
       accept: 'application/json',
-      'content-type': 'application/json',
-      'Content-MD5': md5,
-      'X-Ca-Nonce': nonce,
-      'X-Ca-Key': this.config.sunsynkApiKey,
+      'content-type': 'application/json;charset=UTF-8',
     };
 
-    const headersToSign = new Map<string, string>();
-    headersToSign.set('x-ca-key', this.config.sunsynkApiKey);
-    headersToSign.set('x-ca-nonce', nonce);
-
-    const signatureHeaders = Array.from(headersToSign.keys()).sort().join(',');
-    const textToSign = [
-      'POST',
-      headers.accept,
-      md5,
-      headers['content-type'],
-      '',
-      ...Array.from(headersToSign.entries())
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, value]) => key + ':' + value),
-      path,
-    ].join('\n');
-
-    const signature = crypto
-      .createHmac('sha256', this.config.sunsynkApiSecret)
-      .update(textToSign, 'utf8')
-      .digest('base64');
-
-    headers['X-Ca-Signature'] = signature;
-    headers['X-Ca-Signature-Headers'] = signatureHeaders;
-
-    this.authDebug('Built OpenAPI auth request', {
+    this.authDebug('Built csp-web auth request', {
       path,
       username: this.config.sunsynkUsername,
-      apiKeyMasked: this.mask(this.config.sunsynkApiKey),
       nonce,
-      contentMd5: md5,
-      signatureHeaders,
-      signaturePreview: this.mask(signature, 8, 6),
+      signPreview: this.mask(sign, 8, 6),
+      encryptedPasswordLength: encryptedPassword.length,
       bodyLength: bodyStr.length,
       verifySsl: this.config.sunsynkVerifySsl,
     });
@@ -294,7 +319,7 @@ export class SunsynkService {
       return;
     }
 
-    const { path, bodyStr, headers } = this.buildAuthRequest();
+    const { path, bodyStr, headers } = await this.buildAuthRequest();
 
     let response;
     try {
@@ -327,11 +352,12 @@ export class SunsynkService {
 
     if (response.data.code !== 0) {
       const detail = response.data.msg || 'Unknown error';
-      if (detail.toLowerCase().includes('account or password error')) {
+      // 102 = "Account or password error" (invalid SUNSYNK_USERNAME/SUNSYNK_PASSWORD).
+      if (response.data.code === 102) {
         throw new Error(
           'SunSynk auth failed: ' + detail +
-          '. SunSynk may now require the newer RSA login flow. ' +
-          'As a workaround, add SUNSYNK_ACCESS_TOKEN to .env and restart the server.'
+          '. Check SUNSYNK_USERNAME and SUNSYNK_PASSWORD in .env. ' +
+          'As a fallback, add SUNSYNK_ACCESS_TOKEN to .env and restart the server.'
         );
       }
 

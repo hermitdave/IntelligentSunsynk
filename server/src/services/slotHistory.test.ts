@@ -113,12 +113,12 @@ describe('mergeSlots', () => {
   });
 
   it('DOES NOT promote a slot to fulfilled if wasInChargeSlot is false', () => {
-    // Slot ended and was never observed active
+    // Slot was only ever upcoming and was never observed active
     const slot = makeSlot('2026-01-02T20:00:00Z', '2026-01-02T21:30:00Z');
     const existing: SlotHistory = {
       fulfilled: [],
-      active: [{ ...trackSlot(slot, '2026-01-02T20:00:00Z'), status: 'active' }],
-      futurePlanned: [],
+      active: [],
+      futurePlanned: [{ ...trackSlot(slot, '2026-01-02T10:00:00Z'), status: 'upcoming' }],
       removed: [],
     };
     // Now the slot has ended and wasInChargeSlot is false

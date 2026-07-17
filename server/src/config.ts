@@ -6,6 +6,45 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
+import { SocThreshold } from './types';
+
+/**
+ * Default time-of-day SoC threshold schedule. Times are local; each threshold
+ * applies from its start time until the next, wrapping past midnight (so the
+ * 18:00 entry covers 18:00 → 09:00 the next day).
+ */
+export const DEFAULT_SOC_THRESHOLD_SCHEDULE = '09:00=90,12:00=75,15:00=60,18:00=45';
+
+/**
+ * Parse a "HH:MM=NN,HH:MM=NN,..." schedule string into sorted SocThreshold
+ * entries. Throws on malformed input so misconfiguration fails fast at startup.
+ */
+export function parseSocThresholdSchedule(raw: string): SocThreshold[] {
+  const entries: SocThreshold[] = [];
+  for (const part of raw.split(',').map((p) => p.trim()).filter(Boolean)) {
+    const match = /^(\d{1,2}):(\d{2})=(\d{1,3})$/.exec(part);
+    if (!match) {
+      throw new Error(
+        `Invalid SOC_THRESHOLD_SCHEDULE entry "${part}". Expected "HH:MM=NN" (e.g. "09:00=90").`,
+      );
+    }
+    const hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const threshold = parseInt(match[3], 10);
+    if (hours > 23 || minutes > 59) {
+      throw new Error(`Invalid time in SOC_THRESHOLD_SCHEDULE entry "${part}" (expected 00:00-23:59).`);
+    }
+    if (threshold > 100) {
+      throw new Error(`Invalid threshold in SOC_THRESHOLD_SCHEDULE entry "${part}" (expected 0-100).`);
+    }
+    entries.push({ startMinutes: hours * 60 + minutes, threshold });
+  }
+  if (entries.length === 0) {
+    throw new Error('SOC_THRESHOLD_SCHEDULE must contain at least one "HH:MM=NN" entry.');
+  }
+  entries.sort((a, b) => a.startMinutes - b.startMinutes);
+  return entries;
+}
 
 function loadEnvFiles(): void {
   const repoRootEnvPath = path.resolve(__dirname, '..', '..', '.env');
@@ -69,6 +108,7 @@ export interface Config {
   webPort: number;
   // Scheduler
   cronSchedule: string;
+  socThresholdSchedule: SocThreshold[];
   // Logging
   logLevel: string;
 }
@@ -104,6 +144,9 @@ export function loadConfig(): Config {
     webHost: optionalEnv('WEB_HOST', '0.0.0.0'),
     webPort: parseInt(optionalEnv('WEB_PORT', '8080'), 10),
     cronSchedule: optionalEnv('CRON_SCHEDULE', '*/5 * * * *'),
+    socThresholdSchedule: parseSocThresholdSchedule(
+      optionalEnv('SOC_THRESHOLD_SCHEDULE', DEFAULT_SOC_THRESHOLD_SCHEDULE),
+    ),
     logLevel: optionalEnv('LOG_LEVEL', 'INFO'),
   };
 }

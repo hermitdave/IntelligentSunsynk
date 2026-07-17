@@ -4,7 +4,9 @@
       "Bash(node -e ' *)",
       "Read(//Users/hermit.dave/Projects/**)",
       "Bash(npx tsc *)",
-      "Bash(npx jest *)"
+      "Bash(npx jest *)",
+      "Bash(npx ts-node -e ' *)",
+      "Bash(npx tsx *)"
     ]
   }
 }

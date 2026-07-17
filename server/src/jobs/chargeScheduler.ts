@@ -106,10 +106,45 @@ export async function runChargeCheck(
     appState.slotHistory = mergeSlots(slots, appState.slotHistory, nowIso, inSlot);
     saveSlotHistory(appState.slotHistory);
 
+    // --- Step 3: Get battery SoC (only needed when in a charge slot) ---
+    let batterySoC: number | null = null;
+    const plantId = appState.plantId;
+    if (inSlot && plantId !== null) {
+      try {
+        batterySoC = await sunsynk.getBatterySoC(plantId);
+        schedulerLog('Battery SoC: ' + (batterySoC !== null ? batterySoC + '%' : 'unavailable'));
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        schedulerLog('Failed to get battery SoC: ' + message + ' (proceeding without SoC check)');
+      }
+    }
+
     const inOvernightWindow = isOvernightTimerWindow(now);
-    const desiredValue = inOvernightWindow
-      ? PEAK_VALLEY_NORMAL
-      : (inSlot ? PEAK_VALLEY_CHARGING : PEAK_VALLEY_NORMAL);
+
+    // Determine desired peakAndVallery value:
+    // - During overnight window (23:30-05:30): always use normal mode (1)
+    // - Inside a charge slot: only disable peak/valley (0) if battery SoC < 50%
+    // - Outside a charge slot: use normal mode (1)
+    let desiredValue: string;
+    if (inOvernightWindow) {
+      desiredValue = PEAK_VALLEY_CHARGING;
+    } else if (inSlot) {
+      // Only disable peak/valley if battery SoC is below 50%
+      if (batterySoC !== null && batterySoC < 50) {
+        desiredValue = PEAK_VALLEY_CHARGING;
+        schedulerLog('In charge slot with battery SoC ' + batterySoC + '% < 50%, disabling peak/valley');
+      } else {
+        desiredValue = PEAK_VALLEY_NORMAL;
+        if (batterySoC !== null) {
+          schedulerLog('In charge slot but battery SoC ' + batterySoC + '% >= 50%, keeping peak/valley enabled');
+        } else {
+          schedulerLog('In charge slot but battery SoC unavailable, keeping peak/valley enabled');
+        }
+      }
+    } else {
+      desiredValue = PEAK_VALLEY_NORMAL;
+    }
+
     const currentValue = appState.currentSettings?.peakAndVallery;
     const desiredUseTimer = peakAndValleryToUseTimer(desiredValue);
     const currentUseTimer = peakAndValleryToUseTimer(currentValue);
@@ -117,12 +152,13 @@ export async function runChargeCheck(
     schedulerLog(
       'Dispatch slots: ' + slots.length +
       ', In slot: ' + inSlot +
+      ', Battery SoC: ' + (batterySoC !== null ? batterySoC + '%' : 'N/A') +
       ', Overnight window: ' + inOvernightWindow +
       ', Desired Use Timer: ' + formatBoolean(desiredUseTimer) +
       ', Current Use Timer: ' + formatBoolean(currentUseTimer),
     );
 
-    // --- Step 3: Apply update only if the value has changed ---
+    // --- Step 4: Apply update only if the value has changed ---
     if (currentValue !== desiredValue) {
       schedulerLog(
         'Updating Use Timer: ' +

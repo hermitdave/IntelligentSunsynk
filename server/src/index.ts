@@ -3,12 +3,11 @@
  *
  * Start-up sequence:
  *  1. Load configuration from environment variables.
- *  2. Authenticate with SunSynk OpenAPI and discover the inverter.
- *  3. Read and save current inverter settings (golden snapshot).
+ *  2. Authenticate with SunSynk OpenAPI.
+ *  3. Read and save current inverter settings using the configured serial.
  *  4. Start the recurring charge scheduler (cron job).
  *  5. Serve the Express REST API (and, in production, the React build).
  */
-import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
@@ -26,6 +25,10 @@ async function main() {
   // -------------------------------------------------------------------------
   const config = loadConfig();
   console.log('[Server] Configuration loaded');
+  console.log(
+    '[Server] SunSynk auth mode: ' +
+    (config.sunsynkAccessToken ? 'manual token (SUNSYNK_ACCESS_TOKEN)' : 'OpenAPI password grant')
+  );
 
   // -------------------------------------------------------------------------
   // 2. Service instances
@@ -34,17 +37,19 @@ async function main() {
   const octopus = new OctopusService(config);
 
   // -------------------------------------------------------------------------
-  // 3. Authenticate & discover inverter
+  // 3. Authenticate and initialize inverter access
   // -------------------------------------------------------------------------
   console.log('[Server] Authenticating with SunSynk OpenAPI...');
   await sunsynk.authenticate();
   appState.isAuthenticated = true;
   console.log('[Server] Authentication successful');
 
-  const { plantId, serial } = await sunsynk.discoverInverter();
-  appState.plantId = plantId;
+  const serial = config.sunsynkSerial;
   appState.inverterSerial = serial;
-  console.log('[Server] Inverter found – serial: ' + serial + ', plantId: ' + plantId);
+  appState.plantId = config.sunsynkPlantId;
+  console.log(
+    '[Server] Using configured inverter serial: ' + serial + ', plantId: ' + config.sunsynkPlantId
+  );
 
   // -------------------------------------------------------------------------
   // 4. Read and save initial inverter settings

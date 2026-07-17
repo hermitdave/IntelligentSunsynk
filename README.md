@@ -39,9 +39,10 @@ IntelligentSunsynk/
 
 ## Prerequisites
 
-- Node.js 18+
+- Node.js 24.x (latest LTS)
 - SunSynk OpenAPI credentials (api_key + api_secret) — request from SunSynk support
 - SunSynk account username + password
+- Optional: a current `SUNSYNK_ACCESS_TOKEN` from the SunSynk web app as a fallback if the password grant fails
 - Inverter serial number
 - Octopus Energy API key + account number (from [octopus.energy/dashboard/developer](https://octopus.energy/dashboard/developer/))
 - Intelligent Octopus Go tariff
@@ -60,6 +61,8 @@ cp .env.example .env
 # edit .env
 ```
 
+The server reads `.env` from the **repo root**, including when started via the `server` workspace script.
+
 ### Development
 
 ```bash
@@ -68,6 +71,8 @@ npm start
 ```
 
 Open **http://localhost:3000** for the dashboard.
+
+If you use `nvm`, run `nvm use` first.
 
 ### Production
 
@@ -82,21 +87,29 @@ npm run start:server     # Serves the API + built React app at http://localhost:
 |---|---|---|
 | `SUNSYNK_API_KEY` | ✅ | SunSynk OpenAPI key |
 | `SUNSYNK_API_SECRET` | ✅ | SunSynk OpenAPI secret (for HMAC-SHA256 signing) |
-| `SUNSYNK_USERNAME` | ✅ | SunSynk account email |
-| `SUNSYNK_PASSWORD` | ✅ | SunSynk account password |
+| `SUNSYNK_ACCESS_TOKEN` | Optional | Manual bearer token fallback from the SunSynk web app; when set it bypasses OpenAPI password login |
+| `SUNSYNK_USERNAME` | Conditionally required | SunSynk account email; required unless `SUNSYNK_ACCESS_TOKEN` is set |
+| `SUNSYNK_PASSWORD` | Conditionally required | SunSynk account password; required unless `SUNSYNK_ACCESS_TOKEN` is set |
 | `SUNSYNK_SERIAL` | ✅ | Inverter serial number |
-| `SUNSYNK_PLANT_ID` | Optional | Plant ID (auto-detected if omitted) |
+| `SUNSYNK_PLANT_ID` | ✅ | Plant ID |
 | `SUNSYNK_VERIFY_SSL` | Optional | `true`/`false` (default `false`, recommended by SunSynk) |
 | `OCTOPUS_API_KEY` | ✅ | Octopus Energy REST API key |
 | `OCTOPUS_ACCOUNT_ID` | ✅ | Octopus account number (e.g. `A-XXXXXXXX`) |
-| `OCTOPUS_OFF_PEAK_RATE` | Optional | Off-peak rate in p/kWh (default `7.0`) |
-| `OCTOPUS_PEAK_RATE` | Optional | Peak rate in p/kWh (default `24.0`) |
-| `BATTERY_CAPACITY_KWH` | Optional | Battery size in kWh (default `10.0`, display only) |
-| `BATTERY_MIN_SOC` | Optional | Minimum SOC % (default `10`, display only) |
 | `WEB_HOST` | Optional | Server bind address (default `0.0.0.0`) |
 | `WEB_PORT` | Optional | Server port (default `8080`) |
 | `CRON_SCHEDULE` | Optional | Cron expression (default `*/5 * * * *`) |
 | `LOG_LEVEL` | Optional | `INFO` / `DEBUG` / `WARNING` (default `INFO`) |
+
+### SunSynk Auth Note
+
+If startup fails with `SunSynk auth failed: Account or password error`, the older OpenAPI password grant may no longer be accepted on your account. In that case:
+
+1. Log into the SunSynk web app in your browser.
+2. Open DevTools and inspect local storage for the current user token.
+3. Copy the bearer access token into `SUNSYNK_ACCESS_TOKEN` in your `.env`.
+4. Restart the server.
+
+When `SUNSYNK_ACCESS_TOKEN` is set, the app uses that token directly and skips the password-based OpenAPI login.
 
 ## API Endpoints
 
@@ -105,6 +118,9 @@ npm run start:server     # Serves the API + built React app at http://localhost:
 | `GET` | `/api/status` | Full application state (auth, slots, settings, errors) |
 | `GET` | `/api/charge-slots` | Current dispatch slots + active flag |
 | `GET` | `/api/settings` | Saved (startup) and current inverter settings |
+| `GET` | `/api/plant-overview` | Current SunSynk plant overview payload (`/api/v2/plant/{plantId}/overview`) |
+| `GET` | `/api/power-graph?date=YYYY-MM-DD` | Plant storage power graph (`/api/v2/plant/{plantId}/storage/power`) |
+| `GET` | `/api/energy-flow` | Current plant energy flow (`/api/v2/plant/{plantId}/energy/flow`) |
 | `POST` | `/api/refresh` | Force an immediate scheduler run |
 
 ## Safety

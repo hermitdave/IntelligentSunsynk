@@ -10,6 +10,23 @@ export interface DispatchSlot {
   location: string | null;
 }
 
+export type SlotStatus = 'upcoming' | 'active' | 'fulfilled' | 'removed';
+
+export interface TrackedSlot extends DispatchSlot {
+  fingerprint: string;
+  status: SlotStatus;
+  firstSeen: string;
+  lastSeen: string;
+}
+
+export interface SlotHistory {
+  fulfilled: TrackedSlot[];
+  yesterday: TrackedSlot[];
+  active: TrackedSlot[];
+  futurePlanned: TrackedSlot[];
+  removed: TrackedSlot[];
+}
+
 export type ControlMode = 'charging' | 'discharging' | 'unknown';
 
 export interface AppState {
@@ -33,7 +50,54 @@ export interface ApiChargeSlotsResponse {
   isInChargeSlot: boolean;
 }
 
+export interface ApiSlotHistoryResponse extends SlotHistory {}
+
 export interface ApiSettingsResponse {
   saved: Record<string, string> | null;
   current: Record<string, string> | null;
+}
+
+export interface ApiPlantOverviewResponse {
+  plantId: number;
+  overview: Record<string, unknown>;
+}
+
+export interface ApiPowerGraphResponse {
+  plantId: number;
+  date: string;
+  graph: PowerGraphSeries[];
+}
+
+export interface PowerGraphRecord {
+  time: string;
+  value: string;
+  updateTime: string | null;
+}
+
+export interface PowerGraphSeries {
+  unit: string;
+  records: PowerGraphRecord[];
+  id: string | null;
+  label: string;
+  sn: string | null;
+  groupCode: string | null;
+  name: string;
+  attribute: string | null;
+}
+
+export type PowerGraphLabel = 'PV' | 'Battery' | 'SOC' | 'Load' | 'Grid';
+
+export const POWER_GRAPH_LABELS: PowerGraphLabel[] = ['PV', 'Battery', 'SOC', 'Load', 'Grid'];
+
+export const POWER_GRAPH_COLOURS: Record<PowerGraphLabel, string> = {
+  PV: '#f59e0b',
+  Battery: '#22c55e',
+  SOC: '#3b82f6',
+  Load: '#ef4444',
+  Grid: '#8b5cf6',
+};
+
+export interface ApiEnergyFlowResponse {
+  plantId: number;
+  flow: Record<string, unknown>;
 }

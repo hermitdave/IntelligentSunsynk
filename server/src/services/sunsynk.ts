@@ -1,8 +1,11 @@
 /**
  * SunSynk Cloud API service.
  *
- * Authentication: POST https://openapi.sunsynk.net/oauth/token
- *   Uses HMAC-SHA256 signed request with api_key + api_secret.
+ * Authentication (csp-web browser flow, mirrors api.sunsynk.net/login):
+ *   1. GET  https://api.sunsynk.net/anonymous/publicKey  -> RSA public key
+ *   2. POST https://api.sunsynk.net/oauth/token/new       -> access token
+ *   The password is RSA (PKCS#1 v1.5) encrypted with the fetched public key,
+ *   and each request carries a millisecond `nonce` + hex-MD5 `sign`.
  *
  * Data / Control: https://api.sunsynk.net
  *   All endpoints use a bearer token obtained during auth.
@@ -11,11 +14,18 @@
  */
 import axios, { AxiosInstance } from 'axios';
 import * as crypto from 'crypto';
+import * as https from 'https';
 import { Config } from '../config';
-import { InverterSettings, SunsynkPlant, SunsynkInverter, SunsynkToken } from '../types';
+import {
+  InverterSettings,
+  SunsynkEnergyFlow,
+  SunsynkPlantOverview,
+  SunsynkPowerGraph,
+  SunsynkToken,
+} from '../types';
 
-const OPENAPI_AUTH_URL = 'https://openapi.sunsynk.net';
 const API_DATA_URL = 'https://api.sunsynk.net';
+const APP_PORTAL_URL = 'https://app.sunsynk.net';
 
 /**
  * Subset of settings this app is allowed to write.
@@ -35,64 +45,257 @@ const ALLOWED_WRITE_SETTINGS = new Set([
 export class SunsynkService {
   private config: Config;
   private client: AxiosInstance;
+  private portalClient: AxiosInstance;
+  private authClient: AxiosInstance;
   private accessToken: string | null = null;
   private tokenExpiresAt: Date | null = null;
 
+  private mask(value: string, keepStart = 4, keepEnd = 4): string {
+    if (!value) return '';
+    if (value.length <= keepStart + keepEnd) return '*'.repeat(value.length);
+    return value.slice(0, keepStart) + '*'.repeat(value.length - keepStart - keepEnd) + value.slice(-keepEnd);
+  }
+
+  private authDebug(message: string, meta?: Record<string, unknown>): void {
+    const payload = meta ? ' ' + JSON.stringify(meta) : '';
+    console.log('[SunsynkAuth][DEBUG] ' + message + payload);
+  }
+
+  private portalDebug(message: string, meta?: Record<string, unknown>): void {
+    const payload = meta ? ' ' + JSON.stringify(meta) : '';
+    console.log('[SunsynkPortal][DEBUG] ' + message + payload);
+  }
+
   constructor(config: Config) {
     this.config = config;
+    const httpsAgent = new https.Agent({
+      rejectUnauthorized: this.config.sunsynkVerifySsl,
+    });
+
     this.client = axios.create({
       baseURL: API_DATA_URL,
       timeout: 30_000,
+      httpsAgent,
     });
+
+    this.portalClient = axios.create({
+      baseURL: APP_PORTAL_URL,
+      timeout: 30_000,
+      httpsAgent,
+    });
+
+    this.authClient = axios.create({
+      baseURL: API_DATA_URL,
+      timeout: 30_000,
+      httpsAgent,
+    });
+  }
+
+  /** Make an authenticated request to app.sunsynk.net portal endpoints. */
+  private async requestPortal<T = unknown>(
+    method: 'GET' | 'POST',
+    endpoint: string,
+    data?: Record<string, unknown>,
+    params?: Record<string, unknown>,
+  ): Promise<T> {
+    await this.authenticate();
+
+    this.portalDebug('Request start', {
+      method,
+      endpoint,
+      params: params ?? null,
+    });
+
+    const requestHeaders: Record<string, string> = {
+      Authorization: this.authHeader(),
+      Accept: 'application/json',
+      'Accept-Language': 'en-GB,en;q=0.9',
+      'User-Agent': 'IntelligentSunsynk/1.0',
+    };
+
+    if (data) {
+      requestHeaders['Content-Type'] = 'application/json';
+    }
+
+    let response;
+    try {
+      response = await this.portalClient.request<
+        | { code?: number; msg?: string; data?: T }
+        | T
+      >({
+        method,
+        url: endpoint,
+        headers: requestHeaders,
+        params,
+        data,
+      });
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        this.portalDebug('Request failed', {
+          method,
+          endpoint,
+          params: params ?? null,
+          status: err.response?.status,
+          statusText: err.response?.statusText,
+          responseData: err.response?.data,
+          code: err.code,
+          message: err.message,
+        });
+      } else {
+        this.portalDebug('Request failed with non-axios error', {
+          method,
+          endpoint,
+          params: params ?? null,
+          error: String(err),
+        });
+      }
+      throw err;
+    }
+
+    this.portalDebug('Request success', {
+      method,
+      endpoint,
+      params: params ?? null,
+      status: response.status,
+    });
+
+    if (response.status === 401) {
+      this.accessToken = null;
+      this.tokenExpiresAt = null;
+      return this.requestPortal<T>(method, endpoint, data, params);
+    }
+
+    const payload = response.data;
+    if (
+      payload &&
+      typeof payload === 'object' &&
+      !Array.isArray(payload) &&
+      'code' in payload
+    ) {
+      const wrapped = payload as { code?: number; msg?: string; data?: T };
+      if (typeof wrapped.code === 'number' && wrapped.code !== 0) {
+        throw new Error('SunSynk portal API error [' + wrapped.code + ']: ' + (wrapped.msg ?? 'Unknown error'));
+      }
+      if ('data' in wrapped) {
+        return wrapped.data as T;
+      }
+    }
+
+    return payload as T;
   }
 
   // ===========================================================================
   // Authentication
   // ===========================================================================
 
-  /**
-   * Compute the standard HTTP Content-MD5 header value for a request body.
-   *
-   * This is NOT a password hash — it is a request-body integrity checksum
-   * required by the SunSynk OpenAPI signature scheme (per their documentation).
-   * The security of the authentication comes from the HMAC-SHA256 signature
-   * computed in `calcSignature`, not from this checksum.
-   */
-  private calcMd5(data: string): string {
-    if (!data) return '';
-    return crypto.createHash('md5').update(data, 'utf8').digest('base64');
+  /** Hex-encoded MD5 digest, as used by the SunSynk `sign` request parameter. */
+  private md5Hex(data: string): string {
+    return crypto.createHash('md5').update(data, 'utf8').digest('hex');
   }
 
-  /** Build the HMAC-SHA256 signed request headers for OpenAPI auth. */
-  private calcSignature(
-    method: string,
-    accept: string,
-    md5: string,
-    contentType: string,
-    path: string,
-  ): { signature: string; nonce: string } {
-    const nonce = crypto.randomUUID();
+  /** The `source` identifier the api.sunsynk.net web portal sends. */
+  private readonly authSource = 'sunsynk';
 
-    // Signature format per SunSynk documentation:
-    // METHOD\nAccept\nContent-MD5\nContent-Type\n\nx-ca-key:KEY\nx-ca-nonce:NONCE\nPATH
-    const lines = [
-      method.toUpperCase(),
-      accept,
-      md5,
-      contentType,
-      '',
-      'x-ca-key:' + this.config.sunsynkApiKey,
-      'x-ca-nonce:' + nonce,
+  /**
+   * Fetch the RSA public key used to encrypt the password.
+   *
+   * Mirrors the browser flow: GET /anonymous/publicKey with a millisecond
+   * `nonce` and a hex-MD5 `sign` of `nonce=<n>&source=<src>` + "POWER_VIEW".
+   * Returns the base64 DER (X.509 SubjectPublicKeyInfo) public key string.
+   */
+  private async fetchPublicKey(): Promise<string> {
+    const nonce = Date.now();
+    const base = `nonce=${nonce}&source=${this.authSource}`;
+    const sign = this.md5Hex(base + 'POWER_VIEW');
+    const url = `/anonymous/publicKey?${base}&sign=${sign}`;
+
+    const response = await this.authClient.get<{ code: number; msg: string; data: string }>(url, {
+      headers: { accept: 'application/json' },
+    });
+
+    if (response.data.code !== 0 || !response.data.data) {
+      throw new Error('SunSynk publicKey fetch failed: ' + (response.data.msg || 'Unknown error'));
+    }
+
+    this.authDebug('Fetched OpenAPI public key', {
+      nonce,
+      keyLength: response.data.data.length,
+      keyPreview: this.mask(response.data.data, 10, 0),
+    });
+
+    return response.data.data;
+  }
+
+  /**
+   * RSA-encrypt the password with the fetched public key (PKCS#1 v1.5 padding,
+   * matching JSEncrypt in the browser) and return a base64 string.
+   */
+  private encryptPassword(password: string, publicKeyBase64: string): string {
+    const keyObject = crypto.createPublicKey({
+      key: Buffer.from(publicKeyBase64, 'base64'),
+      format: 'der',
+      type: 'spki',
+    });
+    return crypto
+      .publicEncrypt(
+        { key: keyObject, padding: crypto.constants.RSA_PKCS1_PADDING },
+        Buffer.from(password, 'utf8'),
+      )
+      .toString('base64');
+  }
+
+  /**
+   * Build the csp-web auth request exactly as the api.sunsynk.net login page
+   * does: fetch the RSA public key, encrypt the password, then sign the token
+   * request with a fresh millisecond `nonce` + hex-MD5 `sign` of
+   * `nonce=<n>&source=<src>` + the first 10 chars of the public key.
+   */
+  private async buildAuthRequest(): Promise<{
+    path: string;
+    bodyStr: string;
+    headers: Record<string, string>;
+  }> {
+    const publicKey = await this.fetchPublicKey();
+
+    const nonce = Date.now();
+    const base = `nonce=${nonce}&source=${this.authSource}`;
+    const sign = this.md5Hex(base + publicKey.substring(0, 10));
+    const encryptedPassword = this.encryptPassword(this.config.sunsynkPassword, publicKey);
+
+    const path = '/oauth/token/new';
+    const bodyStr = JSON.stringify({
+      sign,
+      nonce,
+      username: this.config.sunsynkUsername,
+      password: encryptedPassword,
+      grant_type: 'password',
+      client_id: 'csp-web',
+      source: this.authSource,
+    });
+
+    const headers: Record<string, string> = {
+      accept: 'application/json',
+      'content-type': 'application/json;charset=UTF-8',
+    };
+
+    this.authDebug('Built csp-web auth request', {
       path,
-    ];
-    const textToSign = lines.join('\n');
+      username: this.config.sunsynkUsername,
+      nonce,
+      signPreview: this.mask(sign, 8, 6),
+      encryptedPasswordLength: encryptedPassword.length,
+      bodyLength: bodyStr.length,
+      verifySsl: this.config.sunsynkVerifySsl,
+    });
 
-    const signature = crypto
-      .createHmac('sha256', this.config.sunsynkApiSecret)
-      .update(textToSign, 'utf8')
-      .digest('base64');
+    return { path, bodyStr, headers };
+  }
 
-    return { signature, nonce };
+  /** Refresh 1 hour early, but never less than 5 minutes from now. */
+  private calcTokenExpiry(expiresInSeconds: number | undefined): Date {
+    const expiresInMs = Math.max((expiresInSeconds ?? 7 * 24 * 60 * 60) * 1000, 5 * 60 * 1000);
+    const refreshSkewMs = Math.min(60 * 60 * 1000, Math.floor(expiresInMs / 2));
+    return new Date(Date.now() + Math.max(expiresInMs - refreshSkewMs, 5 * 60 * 1000));
   }
 
   /**
@@ -104,43 +307,73 @@ export class SunsynkService {
       return; // Still valid
     }
 
-    const path = '/oauth/token';
-    const body = {
-      username: this.config.sunsynkUsername,
-      password: this.config.sunsynkPassword,
-      grant_type: 'password',
-      client_id: 'openapi',
-    };
-    const bodyStr = JSON.stringify(body);
-    const md5 = this.calcMd5(bodyStr);
-    const accept = 'application/json';
-    const contentType = 'application/json';
-    const { signature, nonce } = this.calcSignature('POST', accept, md5, contentType, path);
+    if (this.config.sunsynkAccessToken) {
+      this.accessToken = this.config.sunsynkAccessToken;
+      // Manual tokens cannot be refreshed automatically; assume 7-day validity
+      // and reuse until expiry or a 401 forces the user to replace it.
+      this.tokenExpiresAt = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
+      console.log('[SunsynkService] Using manual SUNSYNK_ACCESS_TOKEN from environment');
+      this.authDebug('Manual access token path selected', {
+        tokenMasked: this.mask(this.config.sunsynkAccessToken, 8, 6),
+      });
+      return;
+    }
 
-    const headers: Record<string, string> = {
-      Accept: accept,
-      'Content-Type': contentType,
-      'Content-MD5': md5,
-      'X-Ca-Key': this.config.sunsynkApiKey,
-      'X-Ca-Nonce': nonce,
-      'X-Ca-Signature': signature,
-      'X-Ca-Signature-Headers': 'x-ca-key,x-ca-nonce',
-    };
+    const { path, bodyStr, headers } = await this.buildAuthRequest();
 
-    const response = await axios.post<{ code: number; msg: string; data: SunsynkToken }>(
-      OPENAPI_AUTH_URL + path,
-      bodyStr,
-      { headers, timeout: 30_000 },
-    );
+    let response;
+    try {
+      response = await this.authClient.post<{ code: number; msg: string; data: SunsynkToken }>(
+        path,
+        bodyStr,
+        { headers },
+      );
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        this.authDebug('HTTP error during OpenAPI auth request', {
+          status: err.response?.status,
+          statusText: err.response?.statusText,
+          responseData: err.response?.data,
+          code: err.code,
+          message: err.message,
+        });
+      }
+      throw err;
+    }
+
+    this.authDebug('OpenAPI auth HTTP response received', {
+      status: response.status,
+      responseCode: response.data?.code,
+      responseMsg: response.data?.msg,
+      hasData: Boolean(response.data?.data),
+      tokenType: response.data?.data?.token_type,
+      expiresIn: response.data?.data?.expires_in,
+    });
 
     if (response.data.code !== 0) {
-      throw new Error('SunSynk auth failed: ' + response.data.msg);
+      const detail = response.data.msg || 'Unknown error';
+      // 102 = "Account or password error" (invalid SUNSYNK_USERNAME/SUNSYNK_PASSWORD).
+      if (response.data.code === 102) {
+        throw new Error(
+          'SunSynk auth failed: ' + detail +
+          '. Check SUNSYNK_USERNAME and SUNSYNK_PASSWORD in .env. ' +
+          'As a fallback, add SUNSYNK_ACCESS_TOKEN to .env and restart the server.'
+        );
+      }
+
+      throw new Error('SunSynk auth failed: ' + detail);
     }
 
     const tokenData = response.data.data;
     this.accessToken = tokenData.access_token;
-    // Token is valid for 7 days per SunSynk API; refresh 1 day early (7 - 1 = 6 days)
-    this.tokenExpiresAt = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
+    this.tokenExpiresAt = this.calcTokenExpiry(tokenData.expires_in);
+    this.authDebug('OpenAPI auth token accepted', {
+      tokenMasked: this.mask(tokenData.access_token, 10, 8),
+      refreshTokenMasked: this.mask(tokenData.refresh_token ?? '', 10, 8),
+      tokenType: tokenData.token_type,
+      expiresIn: tokenData.expires_in,
+      refreshAt: this.tokenExpiresAt.toISOString(),
+    });
   }
 
   /** Build Authorization header value. */
@@ -189,54 +422,6 @@ export class SunsynkService {
   }
 
   // ===========================================================================
-  // Plant & inverter discovery
-  // ===========================================================================
-
-  async getPlants(): Promise<SunsynkPlant[]> {
-    const data = await this.request<{ infos: SunsynkPlant[] }>(
-      'GET',
-      '/api/v1/plants',
-      undefined,
-      { page: 1, limit: 10 },
-    );
-    return data.infos ?? [];
-  }
-
-  async getInverters(plantId: number): Promise<SunsynkInverter[]> {
-    const data = await this.request<{ infos: SunsynkInverter[] }>(
-      'GET',
-      '/api/v1/plant/' + plantId + '/inverters',
-      undefined,
-      { page: 1, limit: 10 },
-    );
-    return data.infos ?? [];
-  }
-
-  /**
-   * Discover the inverter serial to use.
-   * Uses the configured serial/plant directly if provided, otherwise auto-discovers.
-   */
-  async discoverInverter(): Promise<{ plantId: number; serial: string }> {
-    if (this.config.sunsynkPlantId && this.config.sunsynkSerial) {
-      return { plantId: this.config.sunsynkPlantId, serial: this.config.sunsynkSerial };
-    }
-
-    const plants = await this.getPlants();
-    if (!plants.length) throw new Error('No SunSynk plants found on this account');
-
-    const plantId = plants[0].id;
-    const inverters = await this.getInverters(plantId);
-    if (!inverters.length) throw new Error('No inverters found for plant ' + plantId);
-
-    // If serial configured, find matching; otherwise use the first inverter
-    const serial = this.config.sunsynkSerial
-      ? (inverters.find((i) => i.sn === this.config.sunsynkSerial)?.sn ?? inverters[0].sn)
-      : inverters[0].sn;
-
-    return { plantId, serial };
-  }
-
-  // ===========================================================================
   // Inverter settings
   // ===========================================================================
 
@@ -267,5 +452,76 @@ export class SunsynkService {
     }
 
     await this.request('POST', '/api/v1/common/setting/' + serial + '/set', safeSettings);
+  }
+
+  /** Read current plant overview data. */
+  async getPlantOverview(plantId: number): Promise<SunsynkPlantOverview> {
+    const endpoint = '/api/v2/plant/' + plantId + '/overview';
+    this.portalDebug('Fetching plant overview', { plantId, endpoint });
+    try {
+      const overview = await this.requestPortal<SunsynkPlantOverview>('GET', endpoint);
+      this.portalDebug('Plant overview fetched', {
+        plantId,
+        topLevelKeys: Object.keys(overview ?? {}).slice(0, 20),
+      });
+      return overview;
+    } catch (err) {
+      if (axios.isAxiosError(err)) {
+        this.portalDebug('Plant overview fetch failed', {
+          plantId,
+          endpoint,
+          status: err.response?.status,
+          statusText: err.response?.statusText,
+          responseData: err.response?.data,
+          message: err.message,
+        });
+      } else {
+        this.portalDebug('Plant overview fetch failed with non-axios error', {
+          plantId,
+          endpoint,
+          error: String(err),
+        });
+      }
+      throw err;
+    }
+  }
+
+  /** Read plant storage power graph data for a specific date. */
+  async getPlantPowerGraph(
+    plantId: number,
+    date: string,
+    language = 'en',
+  ): Promise<SunsynkPowerGraph> {
+    return this.requestPortal<SunsynkPowerGraph>(
+      'GET',
+      '/api/v2/plant/' + plantId + '/storage/power',
+      undefined,
+      { date, id: plantId, language },
+    );
+  }
+
+  /** Read current plant energy flow data. */
+  async getPlantEnergyFlow(plantId: number): Promise<SunsynkEnergyFlow> {
+    return this.requestPortal<SunsynkEnergyFlow>('GET', '/api/v2/plant/' + plantId + '/energy/flow');
+  }
+
+  /**
+   * Read battery state of charge (SoC) from the plant overview.
+   * Returns SoC as a percentage (0-100), or null if not available.
+   */
+  async getBatterySoC(plantId: number): Promise<number | null> {
+    const overview = await this.getPlantOverview(plantId);
+    // The SunSynk API typically returns battery SoC as 'soc' or 'batterySoc' in the overview
+    const soc = (overview as Record<string, unknown>).soc ?? (overview as Record<string, unknown>).batterySoc;
+    if (typeof soc === 'number') {
+      return soc;
+    }
+    if (typeof soc === 'string') {
+      const parsed = parseFloat(soc);
+      if (!isNaN(parsed)) {
+        return parsed;
+      }
+    }
+    return null;
   }
 }

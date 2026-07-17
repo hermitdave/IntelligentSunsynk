@@ -49,15 +49,46 @@ export interface InverterSettings {
   [key: string]: string | undefined;
 }
 
-export interface SunsynkPlant {
-  id: number;
-  name: string;
+/**
+ * Plant overview payload from SunSynk Cloud.
+ * The schema may evolve, so this is intentionally open-ended.
+ */
+export interface SunsynkPlantOverview {
+  [key: string]: unknown;
 }
 
-export interface SunsynkInverter {
-  sn: string;
-  alias?: string;
-  plantId?: number;
+/**
+ * Plant storage power graph payload from SunSynk Cloud.
+ */
+export interface SunsynkPowerGraph {
+  plantId: number;
+  date: string;
+  graph: PowerGraphSeries[];
+}
+
+export interface PowerGraphRecord {
+  time: string;
+  value: string;
+  updateTime: string | null;
+}
+
+export interface PowerGraphSeries {
+  unit: string;
+  records: PowerGraphRecord[];
+  id: string | null;
+  label: string;
+  sn: string | null;
+  groupCode: string | null;
+  name: string;
+  attribute: string | null;
+}
+
+/**
+ * Plant energy flow payload from SunSynk Cloud.
+ * The schema may evolve, so this is intentionally open-ended.
+ */
+export interface SunsynkEnergyFlow {
+  [key: string]: unknown;
 }
 
 // =============================================================================
@@ -77,11 +108,81 @@ export interface DispatchSlot {
   location: string | null;
 }
 
+/**
+ * Lifecycle status of a dispatch slot relative to the current time.
+ * - "upcoming"  – slot has not started yet
+ * - "active"    – current time is within the slot window
+ * - "fulfilled" – slot end time has passed (was tracked while active)
+ * - "removed"   – slot was planned by Octopus but later disappeared from the
+ *                 dispatch list (cancelled, moved, or superseded)
+ */
+export type SlotStatus = 'upcoming' | 'active' | 'fulfilled' | 'removed';
+
+/**
+ * A dispatch slot enriched with lifecycle metadata.
+ *
+ * `fingerprint` is a stable identifier derived from start/end/source so the
+ * same logical slot can be matched across scheduler runs even if Octopus
+ * re-orders or re-issues its planned dispatch list.
+ */
+export interface TrackedSlot extends DispatchSlot {
+  /** Stable hash of start + end + source for deduplication */
+  fingerprint: string;
+  /** Current lifecycle status */
+  status: SlotStatus;
+  /** ISO timestamp of the first scheduler run that observed this slot */
+  firstSeen: string;
+  /** ISO timestamp of the most recent scheduler run that observed this slot */
+  lastSeen: string;
+  /**
+   * True once a scheduler run's clock fell within this slot's [start, end)
+   * window — i.e. the slot was actually reached, regardless of whether Octopus
+   * still advertised it. This is the authoritative "was active" signal used to
+   * promote a slot to `fulfilled`; it does not depend on the slot remaining in
+   * Octopus's `plannedDispatches`, which drops a dispatch when it activates.
+   */
+  observedActive?: boolean;
+}
+
+/**
+ * Persisted charge slot history.
+ *
+ * `fulfilled` is append-only: once a slot's end time has passed it is moved
+ * here and never removed. `yesterday` is a convenience view of fulfilled
+ * slots whose end time fell on the previous calendar day. `futurePlanned`
+ * holds upcoming slots that have not yet started. `removed` holds slots that
+ * were planned by Octopus but later disappeared from the dispatch list.
+ */
+export interface SlotHistory {
+  /** Slots that have completed (end time in the past). Append-only. */
+  fulfilled: TrackedSlot[];
+  /** Slots scheduled to start in the future. */
+  futurePlanned: TrackedSlot[];
+  /** Slots currently in their active window. */
+  active: TrackedSlot[];
+  /** Slots that were planned but later disappeared from Octopus. */
+  removed: TrackedSlot[];
+}
+
 // =============================================================================
 // APPLICATION STATE
 // =============================================================================
 
 export type ControlMode = 'charging' | 'discharging' | 'unknown';
+
+/**
+ * One entry in the time-of-day battery SoC threshold schedule.
+ *
+ * `startMinutes` is minutes-past-local-midnight (0-1439) at which this
+ * threshold begins to apply; it stays in effect until the next entry's start
+ * time, wrapping around midnight for the last entry of the day. `threshold` is
+ * the battery SoC percentage below which grid charging (peakAndVallery = "0")
+ * is engaged while inside a dispatch slot.
+ */
+export interface SocThreshold {
+  startMinutes: number;
+  threshold: number;
+}
 
 export interface AppState {
   /** Whether we have a valid Sunsynk API token */
@@ -98,6 +199,10 @@ export interface AppState {
   chargeSlots: DispatchSlot[];
   /** Whether the current time is within an active dispatch slot */
   isInChargeSlot: boolean;
+  /** Persisted charge slot history (fulfilled, active, future planned, removed) */
+  slotHistory: SlotHistory;
+  /** Time-of-day battery SoC thresholds for grid charging, sorted by start. */
+  socThresholdSchedule: SocThreshold[];
   /** Current control mode applied to the inverter */
   controlMode: ControlMode;
   /** ISO timestamp of last successful scheduler run */

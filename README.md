@@ -85,8 +85,6 @@ npm run start:server     # Serves the API + built React app at http://localhost:
 
 | Variable | Required | Description |
 |---|---|---|
-| `SUNSYNK_API_KEY` | ✅ | SunSynk OpenAPI key |
-| `SUNSYNK_API_SECRET` | ✅ | SunSynk OpenAPI secret (for HMAC-SHA256 signing) |
 | `SUNSYNK_ACCESS_TOKEN` | Optional | Manual bearer token fallback from the SunSynk web app; when set it bypasses OpenAPI password login |
 | `SUNSYNK_USERNAME` | Conditionally required | SunSynk account email; required unless `SUNSYNK_ACCESS_TOKEN` is set |
 | `SUNSYNK_PASSWORD` | Conditionally required | SunSynk account password; required unless `SUNSYNK_ACCESS_TOKEN` is set |
@@ -95,6 +93,7 @@ npm run start:server     # Serves the API + built React app at http://localhost:
 | `SUNSYNK_VERIFY_SSL` | Optional | `true`/`false` (default `false`, recommended by SunSynk) |
 | `OCTOPUS_API_KEY` | ✅ | Octopus Energy REST API key |
 | `OCTOPUS_ACCOUNT_ID` | ✅ | Octopus account number (e.g. `A-XXXXXXXX`) |
+| `SOC_THRESHOLD_SCHEDULE` | ✅ | Time and Battery SoC levels |
 | `WEB_HOST` | Optional | Server bind address (default `0.0.0.0`) |
 | `WEB_PORT` | Optional | Server port (default `8080`) |
 | `CRON_SCHEDULE` | Optional | Cron expression (default `*/5 * * * *`) |

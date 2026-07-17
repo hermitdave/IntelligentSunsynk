@@ -193,6 +193,12 @@ export default function App() {
           Dashboard
         </button>
         <button
+          className={activeTab === 'portal' ? 'tab active' : 'tab'}
+          onClick={() => setActiveTab('portal')}
+        >
+          Power graph
+        </button>
+        <button
           className={activeTab === 'slots' ? 'tab active' : 'tab'}
           onClick={() => setActiveTab('slots')}
         >
@@ -204,12 +210,7 @@ export default function App() {
         >
           Settings
         </button>
-        <button
-          className={activeTab === 'portal' ? 'tab active' : 'tab'}
-          onClick={() => setActiveTab('portal')}
-        >
-          Portal Data
-        </button>
+        
       </nav>
 
       <main className="app-main">

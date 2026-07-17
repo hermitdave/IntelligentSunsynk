@@ -134,6 +134,14 @@ export interface TrackedSlot extends DispatchSlot {
   firstSeen: string;
   /** ISO timestamp of the most recent scheduler run that observed this slot */
   lastSeen: string;
+  /**
+   * True once a scheduler run's clock fell within this slot's [start, end)
+   * window — i.e. the slot was actually reached, regardless of whether Octopus
+   * still advertised it. This is the authoritative "was active" signal used to
+   * promote a slot to `fulfilled`; it does not depend on the slot remaining in
+   * Octopus's `plannedDispatches`, which drops a dispatch when it activates.
+   */
+  observedActive?: boolean;
 }
 
 /**

@@ -186,7 +186,10 @@ describe('mergeSlots', () => {
     expect(result.removed[0].status).toBe('removed');
   });
 
-  it('marks a disappeared active slot as removed', () => {
+  it('keeps an active slot active when it drops from the fresh list mid-window', () => {
+    // Octopus removes a dispatch from plannedDispatches the moment it activates,
+    // so a slot that is currently within its window can vanish from the fresh
+    // list. It must NOT be treated as removed — it is still charging.
     const slot = makeSlot('2026-01-02T20:00:00Z', '2026-01-02T21:30:00Z');
     const existing: SlotHistory = {
       fulfilled: [],
@@ -196,10 +199,52 @@ describe('mergeSlots', () => {
     };
     // Slot is still in its window but disappeared from fresh list
     const result = mergeSlots([], existing, '2026-01-02T20:15:00Z', false);
+    expect(result.removed).toHaveLength(0);
+    expect(result.active).toHaveLength(1);
+    expect(result.active[0].fingerprint).toBe(slotFingerprint(slot));
+    expect(result.active[0].observedActive).toBe(true);
+  });
+
+  it('promotes a slot to fulfilled even if it is still present in the fresh list after ending', () => {
+    // Regression: a slot Octopus still lists after its end must reach fulfilled.
+    const slot = makeSlot('2026-01-02T20:00:00Z', '2026-01-02T21:30:00Z');
+    const existing: SlotHistory = {
+      fulfilled: [],
+      active: [{ ...trackSlot(slot, '2026-01-02T20:00:00Z'), status: 'active', observedActive: true }],
+      futurePlanned: [],
+      removed: [],
+    };
+    // Slot has ended but Octopus still returns it in the dispatch list
+    const result = mergeSlots([slot], existing, '2026-01-02T22:00:00Z', false);
+    expect(result.fulfilled).toHaveLength(1);
+    expect(result.fulfilled[0].fingerprint).toBe(slotFingerprint(slot));
     expect(result.active).toHaveLength(0);
-    expect(result.removed).toHaveLength(1);
-    expect(result.removed[0].fingerprint).toBe(slotFingerprint(slot));
-    expect(result.removed[0].status).toBe('removed');
+  });
+
+  it('recovers a slot from removed and fulfils it once its window passes', () => {
+    // Regression for the plannedDispatches drop: slot goes active off-list,
+    // then ends, across successive runs — it must end up fulfilled, not stuck.
+    const slot = makeSlot('2026-01-02T20:00:00Z', '2026-01-02T21:30:00Z');
+    const existing: SlotHistory = {
+      fulfilled: [],
+      active: [],
+      futurePlanned: [{ ...trackSlot(slot, '2026-01-02T10:00:00Z'), status: 'upcoming' }],
+      removed: [],
+    };
+    // Run 1: window has begun but Octopus already dropped it from the list.
+    const run1 = mergeSlots([], existing, '2026-01-02T20:15:00Z', false);
+    expect(run1.active).toHaveLength(1);
+    expect(run1.removed).toHaveLength(0);
+
+    // Run 2: still off-list, still within window.
+    const run2 = mergeSlots([], run1, '2026-01-02T21:00:00Z', false);
+    expect(run2.active).toHaveLength(1);
+
+    // Run 3: window has ended → fulfilled.
+    const run3 = mergeSlots([], run2, '2026-01-02T22:00:00Z', false);
+    expect(run3.fulfilled).toHaveLength(1);
+    expect(run3.active).toHaveLength(0);
+    expect(run3.removed).toHaveLength(0);
   });
 
   it('does not duplicate removed slots on repeated runs', () => {

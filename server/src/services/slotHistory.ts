@@ -8,11 +8,13 @@
  *  3. Classify slots into `futurePlanned`, `active`, and `fulfilled`.
  *  4. Persist the history to disk so it survives server restarts.
  *
- * IMPORTANT RULE: A slot is only moved to `fulfilled` if the scheduler
- * observed it as active at least once (i.e. `isInChargeSlot` was true during
- * its window). Slots that Octopus planned but never became active — because
- * they were cancelled, moved, or the server was offline — are NOT recorded as
- * fulfilled. This keeps the history truthful to what actually happened.
+ * IMPORTANT RULE: A slot is only moved to `fulfilled` if a scheduler run's
+ * clock fell within its [start, end) window at least once (tracked via the
+ * sticky `observedActive` flag). Slots that Octopus planned but were cancelled
+ * or moved before their window, or that the server never ran during — are NOT
+ * recorded as fulfilled. This keeps the history truthful to what happened, and
+ * does not rely on the slot still appearing in Octopus's `plannedDispatches`
+ * (which drops a dispatch the moment it activates).
  */
 import fs from 'fs';
 import path from 'path';
@@ -60,24 +62,33 @@ export function classifySlot(slot: DispatchSlot, nowIso: string): TrackedSlot['s
 /**
  * Merge freshly-fetched slots into the existing history.
  *
- * Algorithm:
- *  - Build a map of existing tracked slots keyed by fingerprint.
- *  - For each fresh slot:
- *      • If seen before → update `lastSeen` and reclassify status.
- *      • If new        → add as a new TrackedSlot.
- *  - Promote active slots whose end time has passed to `fulfilled`, BUT only
- *    if they were observed as active (status was "active" in the existing
- *    history). Slots that were only ever "upcoming" and then disappeared or
- *    jumped straight to past without being observed active are dropped.
- *  - Slots currently in their window → `active`.
- *  - Slots starting in the future → `futurePlanned`.
+ * Every previously-tracked slot (from ALL buckets, including `removed`) plus
+ * every fresh slot is folded into a single fingerprint-keyed map, then each is
+ * re-bucketed from its start/end times relative to `now`:
+ *
+ *  - Within its window ([start, end)) → `active`, and permanently flagged
+ *    `observedActive`. This holds even if the slot has dropped out of the fresh
+ *    Octopus list: `plannedDispatches` removes a dispatch the moment it
+ *    activates, so presence in the fresh list is NOT a reliable "is active"
+ *    signal — the clock is.
+ *  - Ended (now ≥ end):
+ *      • `observedActive` (ever reached its window) → `fulfilled`.
+ *      • otherwise, if it was previously `removed` → stays `removed`.
+ *      • otherwise (only ever upcoming, never reached) → dropped, keeping the
+ *        history truthful about what actually happened.
+ *  - Still upcoming and still advertised by Octopus → `futurePlanned`.
+ *  - Still upcoming but gone from the fresh list → `removed` (cancelled/moved).
+ *
+ * Because slots are re-derived from the map each run, a slot that briefly
+ * vanished (and was parked in `removed`) can recover once it is seen again or
+ * its window arrives — the previous implementation lost such slots forever.
  *
  * @param freshSlots   Raw dispatch slots from Octopus this run.
  * @param existing     The current persisted history.
  * @param nowIso       ISO timestamp of this scheduler run.
  * @param wasInChargeSlot  Whether the scheduler detected an active slot this
- *                          run (used to confirm a slot was actually observed
- *                          active before it can be fulfilled).
+ *                          run. Retained for API compatibility; slot activeness
+ *                          is now determined from the clock, not this flag.
  */
 export function mergeSlots(
   freshSlots: DispatchSlot[],
@@ -85,89 +96,69 @@ export function mergeSlots(
   nowIso: string,
   wasInChargeSlot: boolean,
 ): SlotHistory {
+  void wasInChargeSlot; // activeness is derived from slot windows, see below
   const now = new Date(nowIso).getTime();
 
-  // Index existing tracked slots by fingerprint for quick lookup
-  const existingByFp = new Map<string, TrackedSlot>();
-  for (const s of [...existing.fulfilled, ...existing.active, ...existing.futurePlanned]) {
-    existingByFp.set(s.fingerprint, s);
-  }
+  // Index every previously-tracked slot by fingerprint. `removed` is included
+  // so a slot that briefly disappeared from Octopus can recover rather than
+  // being stranded. Later buckets overwrite earlier ones, so the most
+  // authoritative state wins and `observedActive` is preserved for slots that
+  // were already active or fulfilled.
+  const tracked = new Map<string, TrackedSlot>();
+  for (const s of existing.removed) tracked.set(s.fingerprint, s);
+  for (const s of existing.futurePlanned) tracked.set(s.fingerprint, s);
+  for (const s of existing.active) tracked.set(s.fingerprint, { ...s, observedActive: true });
+  for (const s of existing.fulfilled) tracked.set(s.fingerprint, { ...s, observedActive: true });
 
-  // Track which fingerprints we've seen this run
+  // Fold in fresh slots: refresh fields + lastSeen, preserving firstSeen and
+  // the sticky observedActive flag.
   const seenFps = new Set<string>();
-
-  // Process fresh slots from Octopus
-  const active: TrackedSlot[] = [];
-  const futurePlanned: TrackedSlot[] = [];
-
   for (const raw of freshSlots) {
     const fp = slotFingerprint(raw);
     seenFps.add(fp);
-    const status = classifySlot(raw, nowIso);
-
-    const prev = existingByFp.get(fp);
-    if (prev) {
-      // Update existing tracked slot
-      const updated: TrackedSlot = {
-        ...prev,
-        ...raw,
-        fingerprint: fp,
-        status,
-        lastSeen: nowIso,
-      };
-      existingByFp.set(fp, updated);
-      if (status === 'active') active.push(updated);
-      else if (status === 'upcoming') futurePlanned.push(updated);
-      // fulfilled fresh slots are handled below via promotion
-    } else {
-      // New slot — only track if upcoming or active (not already past)
-      if (status === 'fulfilled') {
-        // Slot already ended and we never saw it — skip unless we are
-        // currently in a charge slot (edge case: slot just ended this run)
-        continue;
-      }
-      const tracked = trackSlot(raw, nowIso);
-      if (status === 'active') active.push(tracked);
-      else futurePlanned.push(tracked);
-      existingByFp.set(fp, tracked);
-    }
+    const prev = tracked.get(fp);
+    tracked.set(fp, {
+      ...raw,
+      fingerprint: fp,
+      status: prev?.status ?? classifySlot(raw, nowIso),
+      firstSeen: prev?.firstSeen ?? nowIso,
+      lastSeen: nowIso,
+      observedActive: prev?.observedActive,
+    });
   }
 
-  // Promote previously-active slots whose end has now passed to fulfilled.
-  // Only promote if the slot was observed as active (status was "active" in
-  // existing history) OR wasInChargeSlot is true this run for this slot.
-  // Slots that disappeared from the fresh list (cancelled/moved by Octopus)
-  // are marked as "removed" so users can see what was cancelled.
-  const fulfilled: TrackedSlot[] = [...existing.fulfilled];
-  const removed: TrackedSlot[] = [...existing.removed];
+  const fulfilled: TrackedSlot[] = [];
+  const active: TrackedSlot[] = [];
+  const futurePlanned: TrackedSlot[] = [];
+  const removed: TrackedSlot[] = [];
 
-  for (const [fp, tracked] of existingByFp) {
-    if (seenFps.has(fp)) continue; // still in fresh list, handled above
-    const end = new Date(tracked.end).getTime();
-    if (now >= end) {
-      // Slot has ended. Only persist as fulfilled if it was observed active.
-      if (tracked.status === 'active' || wasInChargeSlot) {
-        const fulfilledSlot: TrackedSlot = {
-          ...tracked,
-          status: 'fulfilled',
-          lastSeen: nowIso,
-        };
-        // Avoid duplicates in fulfilled
-        if (!fulfilled.some((f) => f.fingerprint === fp)) {
-          fulfilled.push(fulfilledSlot);
-        }
+  for (const [fp, slot] of tracked) {
+    const start = new Date(slot.start).getTime();
+    const end = new Date(slot.end).getTime();
+    const inWindow = now >= start && now < end;
+    const ended = now >= end;
+    const seen = seenFps.has(fp);
+    // Sticky: once we have been inside the window, it stays observed active.
+    const observedActive = Boolean(slot.observedActive) || inWindow;
+    const lastSeen = seen ? nowIso : slot.lastSeen;
+
+    if (inWindow) {
+      // Currently charging — active even if it dropped from the fresh list.
+      active.push({ ...slot, status: 'active', observedActive: true, lastSeen });
+    } else if (ended) {
+      if (observedActive) {
+        fulfilled.push({ ...slot, status: 'fulfilled', observedActive: true, lastSeen });
+      } else if (slot.status === 'removed') {
+        // Was cancelled before it started; keep it visible in removed.
+        removed.push({ ...slot, status: 'removed', lastSeen });
       }
-      // If not observed active, drop it silently (already ended)
+      // else: only ever upcoming and never reached → drop silently.
+    } else if (seen) {
+      // Still upcoming and still advertised by Octopus.
+      futurePlanned.push({ ...slot, status: 'upcoming', lastSeen: nowIso });
     } else {
-      // Slot hasn't ended yet but disappeared from Octopus — mark as removed
-      const removedSlot: TrackedSlot = {
-        ...tracked,
-        status: 'removed',
-        lastSeen: nowIso,
-      };
-      if (!removed.some((r) => r.fingerprint === fp)) {
-        removed.push(removedSlot);
-      }
+      // Upcoming but no longer advertised → cancelled/moved before starting.
+      removed.push({ ...slot, status: 'removed', lastSeen: nowIso });
     }
   }
 

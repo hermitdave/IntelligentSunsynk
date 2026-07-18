@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   LineChart,
   Line,
@@ -9,6 +10,19 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { PowerGraphSeries, POWER_GRAPH_COLOURS } from '../types';
+
+/** Use a shorter chart on phones so it fits without excessive scrolling. */
+function useChartHeight(): number {
+  const compute = () =>
+    typeof window !== 'undefined' && window.innerWidth <= 640 ? 260 : 350;
+  const [height, setHeight] = useState<number>(compute);
+  useEffect(() => {
+    const onResize = () => setHeight(compute());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  return height;
+}
 
 interface PowerGraphChartProps {
   data: PowerGraphSeries[];
@@ -42,6 +56,8 @@ const LABEL_COLOURS: Record<string, string> = {
 };
 
 export function PowerGraphChart({ data }: PowerGraphChartProps) {
+  const chartHeight = useChartHeight();
+
   if (!data || data.length === 0) {
     return <p className="chart-empty">No data available.</p>;
   }
@@ -50,7 +66,7 @@ export function PowerGraphChart({ data }: PowerGraphChartProps) {
 
   return (
     <div className="power-graph-chart">
-      <ResponsiveContainer width="100%" height={350}>
+      <ResponsiveContainer width="100%" height={chartHeight}>
         <LineChart data={chartData} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
           <XAxis

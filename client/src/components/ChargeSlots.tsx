@@ -52,23 +52,25 @@ function SlotSection({ title, slots, badgeClass, statusLabel }: {
   return (
     <div className="slot-section">
       <h3>{title}</h3>
-      <table className="slots-table slots-table-sm">
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>Start</th>
-            <th>End</th>
-            <th>Duration</th>
-            <th>Source</th>
-            <th>Energy (kWh)</th>
-          </tr>
-        </thead>
-        <tbody>
-          {slots.map((slot, idx) => (
-            <SlotRow key={slot.fingerprint || idx} slot={slot} statusLabel={statusLabel} badgeClass={badgeClass} />
-          ))}
-        </tbody>
-      </table>
+      <div className="table-wrapper">
+        <table className="slots-table slots-table-sm">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Start</th>
+              <th>End</th>
+              <th>Duration</th>
+              <th>Source</th>
+              <th>Energy (kWh)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {slots.map((slot, idx) => (
+              <SlotRow key={slot.fingerprint || idx} slot={slot} statusLabel={statusLabel} badgeClass={badgeClass} />
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -478,3 +478,98 @@ body {
   padding: 40px 0;
   text-align: center;
 }
+
+/* Smooth horizontal scrolling for any table that overflows on narrow screens */
+.table-wrapper {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ============================================================
+   Responsive / Mobile
+   ============================================================ */
+
+/* Tablets and small laptops: collapse the multi-column panels. */
+@media (max-width: 768px) {
+  .portal-grid { grid-template-columns: 1fr; }
+}
+
+/* Phones. */
+@media (max-width: 640px) {
+  :root { font-size: 14px; }
+
+  .app { padding: 0 12px 28px; }
+
+  /* Header */
+  .app-header { padding: 16px 0 12px; }
+  .header-title h1 { font-size: 19px; }
+  .header-icon { font-size: 24px; }
+  .header-subtitle { font-size: 12px; }
+
+  /* Tabs: stay on one row and scroll horizontally instead of wrapping. */
+  .tab-nav {
+    gap: 6px;
+    padding: 10px 0;
+    margin-bottom: 16px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .tab-nav::-webkit-scrollbar { display: none; }
+  .tab {
+    flex: 0 0 auto;
+    padding: 10px 14px;
+    min-height: 38px;
+    font-size: 13px;
+  }
+
+  /* Cards */
+  .card {
+    padding: 16px 14px;
+    margin-bottom: 16px;
+    border-radius: 8px;
+  }
+  .card-header { margin-bottom: 14px; }
+  .card h2 { font-size: 16px; }
+
+  /* Stat grids: single column reads better on a narrow screen. */
+  .status-grid { grid-template-columns: 1fr; gap: 10px; }
+  .status-item { padding: 10px 12px; }
+
+  /* Tables: tighten padding; horizontal scroll is handled by .table-wrapper. */
+  .slots-table,
+  .settings-table { font-size: 13px; }
+  .slots-table th,
+  .settings-table th { padding: 6px 8px; }
+  .slots-table td,
+  .settings-table td { padding: 8px 8px; }
+  .slots-table-sm th,
+  .slots-table-sm td { padding: 5px 8px; }
+
+  .slot-history { gap: 14px; }
+  .slot-section { padding: 12px 12px; }
+
+  /* Comfortable tap targets. */
+  .btn-refresh {
+    padding: 9px 16px;
+    min-height: 40px;
+    font-size: 14px;
+  }
+
+  /* Portal controls stack full-width. */
+  .portal-controls { gap: 8px; }
+  .date-control { flex: 1 1 auto; }
+  .date-control input { width: 100%; }
+
+  .json-box { max-height: 280px; font-size: 11px; }
+
+  .power-graph-chart { padding: 12px 4px 4px; }
+}
+
+/* Very small phones. */
+@media (max-width: 380px) {
+  .header-title h1 { font-size: 17px; }
+  .header-icon { font-size: 22px; }
+  .tab { padding: 9px 12px; }
+  .card { padding: 14px 12px; }
+}

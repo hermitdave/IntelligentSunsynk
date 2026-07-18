@@ -6,7 +6,12 @@
       "Bash(npx tsc *)",
       "Bash(npx jest *)",
       "Bash(npx ts-node -e ' *)",
-      "Bash(npx tsx *)"
+      "Bash(npx tsx *)",
+      "Bash(npx vitest *)",
+      "Bash(npx vite *)",
+      "Read(//Users/hermit.dave/.nvm/versions/node/**)",
+      "Read(//opt/homebrew/opt/**)",
+      "Read(//Users/hermit.dave/.volta/tools/image/**)"
     ]
   }
 }

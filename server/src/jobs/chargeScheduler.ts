@@ -218,7 +218,7 @@ export async function runChargeCheck(
       schedulerLog('No change needed (Use Timer already ' + formatBoolean(desiredUseTimer) + ')');
     }
 
-    appState.controlMode = inSlot ? 'charging' : 'discharging';
+    appState.controlMode = (inSlot && currentUseTimer) || inOvernightWindow ? 'charging' : 'discharging';
     appState.lastUpdated = new Date().toISOString();
     appState.lastError = null;
     appState.runCount += 1;

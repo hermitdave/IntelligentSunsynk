@@ -193,6 +193,7 @@ describe('runChargeCheck', () => {
     );
 
     expect(sunsynk.updateSettings).toHaveBeenCalledWith('TEST-SERIAL', { peakAndVallery: '0' });
+    expect(appState.controlMode).toBe('charging');
     jest.useRealTimers();
   });
 
@@ -213,6 +214,7 @@ describe('runChargeCheck', () => {
     );
 
     expect(sunsynk.updateSettings).toHaveBeenCalledWith('TEST-SERIAL', { peakAndVallery: '0' });
+    expect(appState.controlMode).toBe('charging');
     jest.useRealTimers();
   });
 
@@ -236,6 +238,7 @@ describe('runChargeCheck', () => {
 
     expect(sunsynk.getBatterySoC).toHaveBeenCalledWith(123);
     expect(sunsynk.updateSettings).toHaveBeenCalledWith('TEST-SERIAL', { peakAndVallery: '0' });
+    expect(appState.controlMode).toBe('charging');
     jest.useRealTimers();
   });
 
@@ -258,6 +261,7 @@ describe('runChargeCheck', () => {
 
     expect(sunsynk.getBatterySoC).toHaveBeenCalledWith(123);
     expect(sunsynk.updateSettings).not.toHaveBeenCalled();
+    expect(appState.controlMode).toBe('charging');
     jest.useRealTimers();
   });
 
@@ -277,10 +281,11 @@ describe('runChargeCheck', () => {
     );
 
     expect(sunsynk.updateSettings).not.toHaveBeenCalled();
+    expect(appState.controlMode).toBe('charging');
     jest.useRealTimers();
   });
 
-  it('keeps peakAndVallery at "1" when outside a charge slot and outside overnight window', async () => {
+  it('keeps peakAndVallery at "1" and controlMode discharging when outside a charge slot and outside overnight window', async () => {
     const fixedDate = new Date('2026-01-03T12:00:00Z');
     jest.useFakeTimers();
     jest.setSystemTime(fixedDate);
@@ -296,6 +301,7 @@ describe('runChargeCheck', () => {
 
     expect(sunsynk.getBatterySoC).not.toHaveBeenCalled();
     expect(sunsynk.updateSettings).not.toHaveBeenCalled();
+    expect(appState.controlMode).toBe('discharging');
     jest.useRealTimers();
   });
 

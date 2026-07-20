@@ -80,6 +80,14 @@ export function ChargeSlots({ slots, isInChargeSlot, slotHistory }: ChargeSlotsP
     (a, b) => new Date(a.start).getTime() - new Date(b.start).getTime(),
   );
 
+  const historyHasSlots = Boolean(
+    slotHistory &&
+      (slotHistory.active.length ||
+        slotHistory.futurePlanned.length ||
+        slotHistory.fulfilled.length ||
+        slotHistory.yesterday.length),
+  );
+
   return (
     <div className="card">
       <div className="card-header">
@@ -115,18 +123,16 @@ export function ChargeSlots({ slots, isInChargeSlot, slotHistory }: ChargeSlotsP
             badgeClass="badge-upcoming"
             statusLabel="Upcoming"
           />
-          <SlotSection
-            title="❌ Removed Slots"
-            slots={slotHistory.removed}
-            badgeClass="badge-removed"
-            statusLabel="Removed"
-          />
         </div>
       )}
 
-      {sorted.length === 0 && !slotHistory ? (
+      {slotHistory ? (
+        !historyHasSlots && (
+          <p className="empty-message">No dispatch slots found from Octopus.</p>
+        )
+      ) : sorted.length === 0 ? (
         <p className="empty-message">No upcoming dispatch slots found from Octopus.</p>
-      ) : sorted.length === 0 ? null : (
+      ) : (
         <div className="table-wrapper">
           <table className="slots-table">
             <thead>

@@ -134,34 +134,22 @@ export interface TrackedSlot extends DispatchSlot {
   firstSeen: string;
   /** ISO timestamp of the most recent scheduler run that observed this slot */
   lastSeen: string;
-  /**
-   * True once a scheduler run's clock fell within this slot's [start, end)
-   * window — i.e. the slot was actually reached, regardless of whether Octopus
-   * still advertised it. This is the authoritative "was active" signal used to
-   * promote a slot to `fulfilled`; it does not depend on the slot remaining in
-   * Octopus's `plannedDispatches`, which drops a dispatch when it activates.
-   */
-  observedActive?: boolean;
 }
 
 /**
- * Persisted charge slot history.
+ * In-memory charge slot history (not persisted to disk).
  *
- * `fulfilled` is append-only: once a slot's end time has passed it is moved
- * here and never removed. `yesterday` is a convenience view of fulfilled
- * slots whose end time fell on the previous calendar day. `futurePlanned`
- * holds upcoming slots that have not yet started. `removed` holds slots that
- * were planned by Octopus but later disappeared from the dispatch list.
+ * `fulfilled` holds slots that have completed. `futurePlanned` holds upcoming
+ * slots that have not yet started. `active` holds slots currently in their
+ * window. Slots whose end time is more than 24 hours in the past are pruned.
  */
 export interface SlotHistory {
-  /** Slots that have completed (end time in the past). Append-only. */
+  /** Slots that have completed (end time in the past, within the last 24h). */
   fulfilled: TrackedSlot[];
   /** Slots scheduled to start in the future. */
   futurePlanned: TrackedSlot[];
   /** Slots currently in their active window. */
   active: TrackedSlot[];
-  /** Slots that were planned but later disappeared from Octopus. */
-  removed: TrackedSlot[];
 }
 
 // =============================================================================

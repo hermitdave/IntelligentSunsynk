@@ -1,17 +1,13 @@
 /**
  * Unit tests for the slot history service.
  */
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
 import {
   slotFingerprint,
   trackSlot,
   classifySlot,
   mergeSlots,
   yesterdaySlots,
-  loadSlotHistory,
-  saveSlotHistory,
+  createEmptyHistory,
 } from './slotHistory';
 import { DispatchSlot, SlotHistory } from '../types';
 
@@ -20,7 +16,7 @@ function makeSlot(startIso: string, endIso: string, source = 'smart-charge'): Di
 }
 
 function emptyHistory(): SlotHistory {
-  return { fulfilled: [], active: [], futurePlanned: [], removed: [] };
+  return createEmptyHistory();
 }
 
 describe('slotFingerprint', () => {
@@ -106,20 +102,18 @@ describe('mergeSlots', () => {
       fulfilled: [],
       active: [{ ...trackSlot(slot, '2026-01-02T20:00:00Z'), status: 'active' }],
       futurePlanned: [],
-      removed: [],
     };
     const result = mergeSlots([slot], existing, '2026-01-02T20:15:00Z', true);
     expect(result.active[0].lastSeen).toBe('2026-01-02T20:15:00Z');
   });
 
-  it('DOES NOT promote a slot to fulfilled if wasInChargeSlot is false', () => {
+  it('DOES NOT promote a slot to fulfilled if it was never observed active', () => {
     // Slot was only ever upcoming and was never observed active
     const slot = makeSlot('2026-01-02T20:00:00Z', '2026-01-02T21:30:00Z');
     const existing: SlotHistory = {
       fulfilled: [],
       active: [],
       futurePlanned: [{ ...trackSlot(slot, '2026-01-02T10:00:00Z'), status: 'upcoming' }],
-      removed: [],
     };
     // Now the slot has ended and wasInChargeSlot is false
     const result = mergeSlots([], existing, '2026-01-02T22:00:00Z', false);
@@ -133,7 +127,6 @@ describe('mergeSlots', () => {
       fulfilled: [],
       active: [{ ...trackSlot(slot, '2026-01-02T20:00:00Z'), status: 'active' }],
       futurePlanned: [],
-      removed: [],
     };
     // Now the slot has ended and wasInChargeSlot is true
     const result = mergeSlots([], existing, '2026-01-02T22:00:00Z', true);
@@ -147,7 +140,6 @@ describe('mergeSlots', () => {
       fulfilled: [],
       active: [{ ...trackSlot(slot, '2026-01-02T20:00:00Z'), status: 'active' }],
       futurePlanned: [],
-      removed: [],
     };
     // wasInChargeSlot false but slot was active before
     const result = mergeSlots([], existing, '2026-01-02T22:00:00Z', false);
@@ -160,108 +152,39 @@ describe('mergeSlots', () => {
       fulfilled: [],
       active: [],
       futurePlanned: [{ ...trackSlot(slot, '2026-01-02T10:00:00Z'), status: 'upcoming' }],
-      removed: [],
     };
     // Slot ended and was never active
     const result = mergeSlots([], existing, '2026-01-02T22:00:00Z', false);
     expect(result.fulfilled).toHaveLength(0);
     expect(result.active).toHaveLength(0);
     expect(result.futurePlanned).toHaveLength(0);
-    expect(result.removed).toHaveLength(0);
   });
 
-  it('marks a disappeared upcoming slot as removed', () => {
+  it('drops a planned slot that disappears from Octopus before it starts', () => {
     const slot = makeSlot('2026-01-03T20:00:00Z', '2026-01-03T21:30:00Z');
     const existing: SlotHistory = {
       fulfilled: [],
       active: [],
       futurePlanned: [{ ...trackSlot(slot, '2026-01-02T10:00:00Z'), status: 'upcoming' }],
-      removed: [],
     };
     // Slot hasn't ended yet but Octopus removed it from the dispatch list
     const result = mergeSlots([], existing, '2026-01-02T12:00:00Z', false);
     expect(result.futurePlanned).toHaveLength(0);
-    expect(result.removed).toHaveLength(1);
-    expect(result.removed[0].fingerprint).toBe(slotFingerprint(slot));
-    expect(result.removed[0].status).toBe('removed');
+    expect(result.active).toHaveLength(0);
+    expect(result.fulfilled).toHaveLength(0);
   });
 
-  it('keeps an active slot active when it drops from the fresh list mid-window', () => {
-    // Octopus removes a dispatch from plannedDispatches the moment it activates,
-    // so a slot that is currently within its window can vanish from the fresh
-    // list. It must NOT be treated as removed — it is still charging.
+  it('drops an active slot that disappears from Octopus before it ends', () => {
     const slot = makeSlot('2026-01-02T20:00:00Z', '2026-01-02T21:30:00Z');
     const existing: SlotHistory = {
       fulfilled: [],
       active: [{ ...trackSlot(slot, '2026-01-02T20:00:00Z'), status: 'active' }],
       futurePlanned: [],
-      removed: [],
     };
     // Slot is still in its window but disappeared from fresh list
     const result = mergeSlots([], existing, '2026-01-02T20:15:00Z', false);
-    expect(result.removed).toHaveLength(0);
-    expect(result.active).toHaveLength(1);
-    expect(result.active[0].fingerprint).toBe(slotFingerprint(slot));
-    expect(result.active[0].observedActive).toBe(true);
-  });
-
-  it('promotes a slot to fulfilled even if it is still present in the fresh list after ending', () => {
-    // Regression: a slot Octopus still lists after its end must reach fulfilled.
-    const slot = makeSlot('2026-01-02T20:00:00Z', '2026-01-02T21:30:00Z');
-    const existing: SlotHistory = {
-      fulfilled: [],
-      active: [{ ...trackSlot(slot, '2026-01-02T20:00:00Z'), status: 'active', observedActive: true }],
-      futurePlanned: [],
-      removed: [],
-    };
-    // Slot has ended but Octopus still returns it in the dispatch list
-    const result = mergeSlots([slot], existing, '2026-01-02T22:00:00Z', false);
-    expect(result.fulfilled).toHaveLength(1);
-    expect(result.fulfilled[0].fingerprint).toBe(slotFingerprint(slot));
     expect(result.active).toHaveLength(0);
-  });
-
-  it('recovers a slot from removed and fulfils it once its window passes', () => {
-    // Regression for the plannedDispatches drop: slot goes active off-list,
-    // then ends, across successive runs — it must end up fulfilled, not stuck.
-    const slot = makeSlot('2026-01-02T20:00:00Z', '2026-01-02T21:30:00Z');
-    const existing: SlotHistory = {
-      fulfilled: [],
-      active: [],
-      futurePlanned: [{ ...trackSlot(slot, '2026-01-02T10:00:00Z'), status: 'upcoming' }],
-      removed: [],
-    };
-    // Run 1: window has begun but Octopus already dropped it from the list.
-    const run1 = mergeSlots([], existing, '2026-01-02T20:15:00Z', false);
-    expect(run1.active).toHaveLength(1);
-    expect(run1.removed).toHaveLength(0);
-
-    // Run 2: still off-list, still within window.
-    const run2 = mergeSlots([], run1, '2026-01-02T21:00:00Z', false);
-    expect(run2.active).toHaveLength(1);
-
-    // Run 3: window has ended → fulfilled.
-    const run3 = mergeSlots([], run2, '2026-01-02T22:00:00Z', false);
-    expect(run3.fulfilled).toHaveLength(1);
-    expect(run3.active).toHaveLength(0);
-    expect(run3.removed).toHaveLength(0);
-  });
-
-  it('does not duplicate removed slots on repeated runs', () => {
-    const slot = makeSlot('2026-01-03T20:00:00Z', '2026-01-03T21:30:00Z');
-    // First run: slot disappears
-    const existing1: SlotHistory = {
-      fulfilled: [],
-      active: [],
-      futurePlanned: [{ ...trackSlot(slot, '2026-01-02T10:00:00Z'), status: 'upcoming' }],
-      removed: [],
-    };
-    const result1 = mergeSlots([], existing1, '2026-01-02T12:00:00Z', false);
-    expect(result1.removed).toHaveLength(1);
-
-    // Second run: slot still gone, should not duplicate
-    const result2 = mergeSlots([], result1, '2026-01-02T14:00:00Z', false);
-    expect(result2.removed).toHaveLength(1);
+    expect(result.fulfilled).toHaveLength(0);
   });
 
   it('keeps a slot in active if it is currently in its window', () => {
@@ -270,10 +193,31 @@ describe('mergeSlots', () => {
       fulfilled: [],
       active: [{ ...trackSlot(slot, '2026-01-02T20:00:00Z'), status: 'active' }],
       futurePlanned: [],
-      removed: [],
     };
     const result = mergeSlots([slot], existing, '2026-01-02T20:15:00Z', true);
     expect(result.active).toHaveLength(1);
+  });
+
+  it('prunes fulfilled slots whose end is more than 24h in the past', () => {
+    const now = '2026-01-03T12:00:00Z';
+    const recent = {
+      ...makeSlot('2026-01-03T09:00:00Z', '2026-01-03T10:00:00Z'),
+      fingerprint: 'recent',
+      status: 'fulfilled' as const,
+      firstSeen: '2026-01-03T08:00:00Z',
+      lastSeen: '2026-01-03T10:00:00Z',
+    };
+    const old = {
+      ...makeSlot('2026-01-02T09:00:00Z', '2026-01-02T10:00:00Z'),
+      fingerprint: 'old',
+      status: 'fulfilled' as const,
+      firstSeen: '2026-01-02T08:00:00Z',
+      lastSeen: '2026-01-02T10:00:00Z',
+    };
+    const existing: SlotHistory = { fulfilled: [recent, old], active: [], futurePlanned: [] };
+    // 'old' ended 26h before now → pruned; 'recent' ended 2h before now → kept.
+    const result = mergeSlots([], existing, now, false);
+    expect(result.fulfilled.map((s) => s.fingerprint)).toEqual(['recent']);
   });
 
   it('sorts each bucket by start time', () => {
@@ -300,7 +244,6 @@ describe('yesterdaySlots', () => {
       ],
       active: [],
       futurePlanned: [],
-      removed: [],
     };
     const result = yesterdaySlots(history, '2026-01-03T12:00:00Z');
     expect(result).toHaveLength(1);
@@ -314,73 +257,8 @@ describe('yesterdaySlots', () => {
       ],
       active: [],
       futurePlanned: [],
-      removed: [],
     };
     const result = yesterdaySlots(history, '2026-01-03T12:00:00Z');
     expect(result).toHaveLength(0);
-  });
-});
-
-describe('loadSlotHistory / saveSlotHistory', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'slot-history-test-'));
-  const tmpFile = path.join(tmpDir, 'slot-history.json');
-
-  afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  });
-
-  it('saves and loads a history round-trip correctly', () => {
-    const history: SlotHistory = {
-      fulfilled: [
-        { ...makeSlot('2026-01-02T20:00:00Z', '2026-01-02T21:30:00Z'), fingerprint: 'fp1', status: 'fulfilled', firstSeen: '2026-01-02T19:00:00Z', lastSeen: '2026-01-02T22:00:00Z' },
-      ],
-      active: [],
-      futurePlanned: [
-        { ...makeSlot('2026-01-03T20:00:00Z', '2026-01-03T21:30:00Z'), fingerprint: 'fp2', status: 'upcoming', firstSeen: '2026-01-02T10:00:00Z', lastSeen: '2026-01-02T10:00:00Z' },
-      ],
-      removed: [],
-    };
-
-    saveSlotHistory(history, tmpFile);
-    const loaded = loadSlotHistory(tmpFile);
-
-    expect(loaded.fulfilled).toHaveLength(1);
-    expect(loaded.fulfilled[0].fingerprint).toBe('fp1');
-    expect(loaded.futurePlanned).toHaveLength(1);
-    expect(loaded.futurePlanned[0].fingerprint).toBe('fp2');
-  });
-
-  it('loadSlotHistory returns empty history for non-existent file', () => {
-    const result = loadSlotHistory('/non/existent/path.json');
-    expect(result.fulfilled).toHaveLength(0);
-    expect(result.active).toHaveLength(0);
-    expect(result.futurePlanned).toHaveLength(0);
-    expect(result.removed).toHaveLength(0);
-  });
-
-  it('loadSlotHistory returns empty history for invalid JSON', () => {
-    const badFile = path.join(tmpDir, 'bad.json');
-    fs.writeFileSync(badFile, 'not valid json {{{', 'utf-8');
-    const result = loadSlotHistory(badFile);
-    expect(result.fulfilled).toHaveLength(0);
-    expect(result.removed).toHaveLength(0);
-  });
-
-  it('saves and loads removed slots correctly', () => {
-    const history: SlotHistory = {
-      fulfilled: [],
-      active: [],
-      futurePlanned: [],
-      removed: [
-        { ...makeSlot('2026-01-03T20:00:00Z', '2026-01-03T21:30:00Z'), fingerprint: 'fp-removed', status: 'removed', firstSeen: '2026-01-02T10:00:00Z', lastSeen: '2026-01-02T12:00:00Z' },
-      ],
-    };
-
-    saveSlotHistory(history, tmpFile);
-    const loaded = loadSlotHistory(tmpFile);
-
-    expect(loaded.removed).toHaveLength(1);
-    expect(loaded.removed[0].fingerprint).toBe('fp-removed');
-    expect(loaded.removed[0].status).toBe('removed');
   });
 });

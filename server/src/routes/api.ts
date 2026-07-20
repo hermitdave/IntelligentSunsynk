@@ -25,7 +25,7 @@ export function createRouter(
     res.json({ slots: appState.chargeSlots, isInChargeSlot: appState.isInChargeSlot });
   });
 
-  /** GET /api/slot-history – persisted charge slot history */
+  /** GET /api/slot-history – in-memory charge slot history */
   router.get('/slot-history', (_req: Request, res: Response) => {
     const nowIso = new Date().toISOString();
     res.json({
@@ -33,7 +33,6 @@ export function createRouter(
       yesterday: yesterdaySlots(appState.slotHistory, nowIso),
       active: appState.slotHistory.active,
       futurePlanned: appState.slotHistory.futurePlanned,
-      removed: appState.slotHistory.removed,
     });
   });
 

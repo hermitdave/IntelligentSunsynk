@@ -167,7 +167,6 @@ function resetAppState(): void {
     fulfilled: [],
     futurePlanned: [],
     active: [],
-    removed: [],
   };
   // Default schedule: 09:00=90, 12:00=75, 15:00=60, 18:00=45 (wraps to 09:00).
   appState.socThresholdSchedule = parseSocThresholdSchedule(DEFAULT_SOC_THRESHOLD_SCHEDULE);
@@ -340,42 +339,6 @@ describe('runChargeCheck', () => {
       'TEST-SERIAL',
     );
     expect(evening.sunsynk.updateSettings).not.toHaveBeenCalled();
-    jest.useRealTimers();
-  });
-
-  it('holds charge mode when a tracked slot is active but Octopus has dropped it from the list', async () => {
-    // Regression: Octopus removes a dispatch from plannedDispatches the moment
-    // it activates. The slot was tracked as upcoming on an earlier run, so the
-    // merge promotes it to active from its window — charge mode must hold even
-    // though the fresh list is now empty.
-    const fixedDate = new Date('2026-01-03T12:00:00Z');
-    jest.useFakeTimers();
-    jest.setSystemTime(fixedDate);
-
-    const slot = makeSlot('2026-01-03T11:00:00Z', '2026-01-03T13:00:00Z');
-    appState.slotHistory.futurePlanned = [
-      {
-        ...slot,
-        fingerprint: [slot.start, slot.end, slot.source].join('|'),
-        status: 'upcoming',
-        firstSeen: '2026-01-03T10:00:00Z',
-        lastSeen: '2026-01-03T10:55:00Z',
-      },
-    ];
-
-    const { sunsynk, octopus } = makeMocks(30); // SoC 30% (< 50)
-    octopus.getDispatchSlots.mockResolvedValue([]); // dropped from planned list
-
-    await runChargeCheck(
-      sunsynk as unknown as never,
-      octopus as unknown as never,
-      'TEST-SERIAL',
-    );
-
-    expect(appState.isInChargeSlot).toBe(true);
-    expect(appState.slotHistory.active).toHaveLength(1);
-    expect(sunsynk.getBatterySoC).toHaveBeenCalledWith(123);
-    expect(sunsynk.updateSettings).toHaveBeenCalledWith('TEST-SERIAL', { peakAndVallery: '0' });
     jest.useRealTimers();
   });
 });

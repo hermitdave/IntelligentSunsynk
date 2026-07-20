@@ -5,9 +5,7 @@
  *
  * Each tick:
  *  1. Fetches upcoming Intelligent Go dispatch slots from Octopus.
- *  2. Checks whether the current time falls within any active slot, using the
- *     merged history so a dispatch that has dropped out of Octopus's planned
- *     list (which happens when it activates) still counts as active.
+ *  2. Checks whether the current local time falls within any active slot.
  *  3. Between 23:30 and 05:30 local time, always sets peakAndVallery = "1"
  *     (Use Timer enabled).
  *  4. If inside a slot outside that overnight window, and battery SoC is below
@@ -22,7 +20,7 @@ import cron from 'node-cron';
 import { Config } from '../config';
 import { SunsynkService } from '../services/sunsynk';
 import { OctopusService } from '../services/octopus';
-import { loadSlotHistory, mergeSlots, saveSlotHistory } from '../services/slotHistory';
+import { mergeSlots } from '../services/slotHistory';
 import { appState } from '../state';
 import { DispatchSlot, SocThreshold } from '../types';
 
@@ -116,29 +114,16 @@ export async function runChargeCheck(
     const slots = await octopus.getDispatchSlots();
     appState.chargeSlots = slots;
 
-    // --- Step 2: Merge slots into persisted history (window-aware) ---
+    // --- Step 2: Check if we are currently in a charge slot ---
     const now = new Date();
-    const nowIso = now.toISOString();
-    // Whether the *fresh* Octopus list shows us in a slot. This is unreliable
-    // on its own: `plannedDispatches` drops a dispatch the moment it activates,
-    // so a slot can vanish from this list while it is still charging.
-    const inSlotFresh = isInChargeSlot(now, slots);
-    appState.slotHistory = mergeSlots(slots, appState.slotHistory, nowIso, inSlotFresh);
-    saveSlotHistory(appState.slotHistory);
-
-    // --- Step 2b: Authoritative "in charge slot" signal ---
-    // Derive it from the merged history's active bucket, which keeps a slot
-    // active for its whole [start, end) window even after Octopus drops it from
-    // plannedDispatches. This prevents the inverter from being switched out of
-    // charge mode mid-dispatch.
-    const inSlot = appState.slotHistory.active.length > 0;
+    const inSlot = isInChargeSlot(now, slots);
     appState.isInChargeSlot = inSlot;
-    if (inSlot && !inSlotFresh) {
-      schedulerLog(
-        'Active slot no longer present in Octopus plannedDispatches ' +
-        '(dispatch has activated) — holding charge mode from tracked history',
-      );
-    }
+
+    // --- Step 2b: Merge slots into the in-memory history ---
+    // Only slots observed as active (isInChargeSlot === true) will be
+    // promoted to fulfilled once their end time passes.
+    const nowIso = now.toISOString();
+    appState.slotHistory = mergeSlots(slots, appState.slotHistory, nowIso, inSlot);
 
     // --- Step 3: Get battery SoC (only needed when in a charge slot) ---
     let batterySoC: number | null = null;
@@ -255,14 +240,7 @@ export function startScheduler(
       .join(', '),
   );
 
-  // Load persisted slot history so fulfilled slots survive restarts
-  appState.slotHistory = loadSlotHistory();
-  schedulerLog(
-    'Loaded slot history: ' +
-    appState.slotHistory.fulfilled.length + ' fulfilled, ' +
-    appState.slotHistory.active.length + ' active, ' +
-    appState.slotHistory.futurePlanned.length + ' future planned',
-  );
+  // Slot history is tracked in memory only and rebuilt from Octopus each run.
 
   // Immediate first run
   runChargeCheck(sunsynk, octopus, serial).catch((err) =>

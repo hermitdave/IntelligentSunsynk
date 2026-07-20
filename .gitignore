@@ -33,4 +33,3 @@ yarn-error.log*
 
 # Test coverage
 coverage/
-server/data/slot-history.json

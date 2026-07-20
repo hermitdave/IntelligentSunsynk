@@ -32,7 +32,8 @@ interface PlannedDispatchResponse {
     plannedDispatches?: Array<{
       startDt: string;
       endDt: string;
-      delta: number | null;
+      // Octopus returns delta as a string (e.g. "-21.08"), sometimes a number.
+      delta: number | string | null;
       meta?: {
         source?: string;
         location?: string;
@@ -163,11 +164,18 @@ export class OctopusService {
       const startIso = slot.startDt.replace(' ', 'T');
       const endIso = slot.endDt.replace(' ', 'T');
 
+      const delta =
+        typeof slot.delta === 'number'
+          ? slot.delta
+          : typeof slot.delta === 'string'
+            ? parseFloat(slot.delta)
+            : NaN;
+
       return {
         start: startIso,
         end: endIso,
         source: slot.meta?.source ?? 'smart-charge',
-        deltaKwh: typeof slot.delta === 'number' ? slot.delta : 0,
+        deltaKwh: Number.isFinite(delta) ? delta : 0,
         location: slot.meta?.location ?? null,
       };
     });

@@ -6,6 +6,7 @@
  */
 import { AppState } from './types';
 import { DEFAULT_SOC_THRESHOLD_SCHEDULE, parseSocThresholdSchedule } from './config';
+import { createEmptyHistory } from './services/slotHistory';
 
 export const appState: AppState = {
   isAuthenticated: false,
@@ -15,12 +16,7 @@ export const appState: AppState = {
   currentSettings: null,
   chargeSlots: [],
   isInChargeSlot: false,
-  slotHistory: {
-    fulfilled: [],
-    futurePlanned: [],
-    active: [],
-    removed: [],
-  },
+  slotHistory: createEmptyHistory(),
   socThresholdSchedule: parseSocThresholdSchedule(DEFAULT_SOC_THRESHOLD_SCHEDULE),
   controlMode: 'unknown',
   lastUpdated: null,

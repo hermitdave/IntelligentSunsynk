@@ -16,8 +16,57 @@ import { loadConfig } from './config';
 import { appState } from './state';
 import { SunsynkService } from './services/sunsynk';
 import { OctopusService } from './services/octopus';
-import { startScheduler } from './jobs/chargeScheduler';
+import { startScheduler, PEAK_VALLEY_NORMAL } from './jobs/chargeScheduler';
 import { createRouter } from './routes/api';
+
+/** Reject after `ms` so a hung inverter call can't block process exit. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('timed out after ' + ms + 'ms')), ms),
+    ),
+  ]);
+}
+
+let shuttingDown = false;
+
+/**
+ * On Ctrl+C / termination, make sure the inverter is left with Use Timer
+ * enabled (peakAndVallery = "1") so it is not stranded in forced-charge mode.
+ * Only writes if the current value differs, and never blocks exit for long.
+ */
+async function gracefulShutdown(
+  signal: string,
+  sunsynk: SunsynkService,
+  serial: string,
+): Promise<void> {
+  if (shuttingDown) {
+    // A second signal (e.g. impatient Ctrl+C) forces an immediate exit.
+    console.log('[Server] Received ' + signal + ' again — forcing exit.');
+    process.exit(1);
+  }
+  shuttingDown = true;
+  console.log('[Server] Received ' + signal + ', restoring Use Timer before exit...');
+
+  try {
+    const current = appState.currentSettings?.peakAndVallery;
+    if (current === PEAK_VALLEY_NORMAL) {
+      console.log('[Server] Use Timer already enabled (peakAndVallery=1); nothing to restore.');
+    } else {
+      await withTimeout(sunsynk.updateSettings(serial, { peakAndVallery: PEAK_VALLEY_NORMAL }), 10_000);
+      appState.currentSettings = { ...(appState.currentSettings ?? {}), peakAndVallery: PEAK_VALLEY_NORMAL } as typeof appState.currentSettings;
+      console.log('[Server] Use Timer restored (peakAndVallery=1). Exiting.');
+    }
+    process.exit(0);
+  } catch (err) {
+    console.error(
+      '[Server] Failed to restore Use Timer on shutdown:',
+      err instanceof Error ? err.message : err,
+    );
+    process.exit(1);
+  }
+}
 
 async function main() {
   // -------------------------------------------------------------------------
@@ -64,6 +113,14 @@ async function main() {
   // 5. Start the recurring charge scheduler
   // -------------------------------------------------------------------------
   startScheduler(config, sunsynk, octopus, serial);
+
+  // Restore Use Timer on shutdown so Ctrl+C never leaves the inverter in
+  // forced-charge mode.
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(signal, () => {
+      void gracefulShutdown(signal, sunsynk, serial);
+    });
+  }
 
   // -------------------------------------------------------------------------
   // 6. Express server

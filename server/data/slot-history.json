@@ -1,0 +1,30 @@
+{
+  "fulfilled": [
+    {
+      "start": "2026-01-03T19:30:00",
+      "end": "2026-01-03T21:00:00",
+      "source": "smart-charge",
+      "deltaKwh": -10,
+      "location": null,
+      "fingerprint": "2026-01-03T19:30:00|2026-01-03T21:00:00|smart-charge",
+      "status": "fulfilled",
+      "firstSeen": "2026-01-03T20:00:00.000Z",
+      "lastSeen": "2026-07-20T08:49:13.717Z"
+    }
+  ],
+  "active": [],
+  "futurePlanned": [
+    {
+      "start": "2026-07-21T04:00:00+00:00",
+      "end": "2026-07-21T04:30:00+00:00",
+      "source": "smart-charge",
+      "deltaKwh": 0,
+      "location": null,
+      "fingerprint": "2026-07-21T04:00:00+00:00|2026-07-21T04:30:00+00:00|smart-charge",
+      "status": "upcoming",
+      "firstSeen": "2026-07-20T08:49:13.717Z",
+      "lastSeen": "2026-07-20T08:50:01.086Z"
+    }
+  ],
+  "removed": []
+}

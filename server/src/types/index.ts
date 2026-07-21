@@ -187,8 +187,6 @@ export interface AppState {
   chargeSlots: DispatchSlot[];
   /** Whether the current time is within an active dispatch slot */
   isInChargeSlot: boolean;
-  /** Persisted charge slot history (fulfilled, active, future planned, removed) */
-  slotHistory: SlotHistory;
   /** Time-of-day battery SoC thresholds for grid charging, sorted by start. */
   socThresholdSchedule: SocThreshold[];
   /** Current control mode applied to the inverter */

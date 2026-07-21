@@ -149,7 +149,7 @@ function makeMocks(batterySoC: number | null = 80) {
     updateSettings: jest.fn().mockResolvedValue(undefined),
   };
   const octopus = {
-    getDispatchSlots: jest.fn().mockResolvedValue([] as DispatchSlot[]),
+    getPlannedDispatchSlots: jest.fn().mockResolvedValue([] as DispatchSlot[]),
   };
   return { sunsynk, octopus };
 }
@@ -163,11 +163,6 @@ function resetAppState(): void {
   appState.controlMode = 'unknown';
   appState.lastError = null;
   appState.runCount = 0;
-  appState.slotHistory = {
-    fulfilled: [],
-    futurePlanned: [],
-    active: [],
-  };
   // Default schedule: 09:00=90, 12:00=75, 15:00=60, 18:00=45 (wraps to 09:00).
   appState.socThresholdSchedule = parseSocThresholdSchedule(DEFAULT_SOC_THRESHOLD_SCHEDULE);
 }
@@ -178,7 +173,7 @@ describe('runChargeCheck', () => {
     resetAppState();
   });
 
-  it('sets peakAndVallery to "0" (charging) during overnight window regardless of slot', async () => {
+  it('keeps Use Timer enabled ("1") and reports charging during the overnight window', async () => {
     // Mock Date to be 02:00 local time (inside overnight window 23:30-05:30)
     const fixedDate = new Date('2026-01-03T02:00:00');
     jest.useFakeTimers();
@@ -191,12 +186,15 @@ describe('runChargeCheck', () => {
       'TEST-SERIAL',
     );
 
-    expect(sunsynk.updateSettings).toHaveBeenCalledWith('TEST-SERIAL', { peakAndVallery: '0' });
+    // Already '1', so no write needed; control mode reflects overnight charging.
+    expect(sunsynk.updateSettings).not.toHaveBeenCalled();
     expect(appState.controlMode).toBe('charging');
+    // SoC is not consulted during the overnight window.
+    expect(sunsynk.getBatterySoC).not.toHaveBeenCalled();
     jest.useRealTimers();
   });
 
-  it('sets peakAndVallery to "0" (charging) during overnight window even when in a slot', async () => {
+  it('keeps Use Timer enabled overnight even when a slot is active, without checking SoC', async () => {
     const fixedDate = new Date('2026-01-03T02:00:00');
     jest.useFakeTimers();
     jest.setSystemTime(fixedDate);
@@ -204,7 +202,7 @@ describe('runChargeCheck', () => {
     // Slot covers the current fake time
     const slot = makeSlot('2026-01-03T01:00:00Z', '2026-01-03T03:00:00Z');
     const { sunsynk, octopus } = makeMocks(80);
-    octopus.getDispatchSlots.mockResolvedValue([slot]);
+    octopus.getPlannedDispatchSlots.mockResolvedValue([slot]);
 
     await runChargeCheck(
       sunsynk as unknown as never,
@@ -212,8 +210,9 @@ describe('runChargeCheck', () => {
       'TEST-SERIAL',
     );
 
-    expect(sunsynk.updateSettings).toHaveBeenCalledWith('TEST-SERIAL', { peakAndVallery: '0' });
+    expect(sunsynk.updateSettings).not.toHaveBeenCalled();
     expect(appState.controlMode).toBe('charging');
+    expect(sunsynk.getBatterySoC).not.toHaveBeenCalled();
     jest.useRealTimers();
   });
 
@@ -225,7 +224,7 @@ describe('runChargeCheck', () => {
 
     const slot = makeSlot('2026-01-03T11:00:00Z', '2026-01-03T13:00:00Z');
     const { sunsynk, octopus } = makeMocks(30); // battery SoC 30%
-    octopus.getDispatchSlots.mockResolvedValue([slot]);
+    octopus.getPlannedDispatchSlots.mockResolvedValue([slot]);
     // Fixed 50% threshold all day, so this test is independent of time-of-day.
     appState.socThresholdSchedule = [{ startMinutes: 0, threshold: 50 }];
 
@@ -248,7 +247,7 @@ describe('runChargeCheck', () => {
 
     const slot = makeSlot('2026-01-03T11:00:00Z', '2026-01-03T13:00:00Z');
     const { sunsynk, octopus } = makeMocks(65); // battery SoC 65%
-    octopus.getDispatchSlots.mockResolvedValue([slot]);
+    octopus.getPlannedDispatchSlots.mockResolvedValue([slot]);
     // Fixed 50% threshold all day, so this test is independent of time-of-day.
     appState.socThresholdSchedule = [{ startMinutes: 0, threshold: 50 }];
 
@@ -260,7 +259,8 @@ describe('runChargeCheck', () => {
 
     expect(sunsynk.getBatterySoC).toHaveBeenCalledWith(123);
     expect(sunsynk.updateSettings).not.toHaveBeenCalled();
-    expect(appState.controlMode).toBe('charging');
+    // Not force-charging (SoC at/above threshold) and not overnight → discharging.
+    expect(appState.controlMode).toBe('discharging');
     jest.useRealTimers();
   });
 
@@ -271,7 +271,7 @@ describe('runChargeCheck', () => {
 
     const slot = makeSlot('2026-01-03T11:00:00Z', '2026-01-03T13:00:00Z');
     const { sunsynk, octopus } = makeMocks(null); // SoC unavailable
-    octopus.getDispatchSlots.mockResolvedValue([slot]);
+    octopus.getPlannedDispatchSlots.mockResolvedValue([slot]);
 
     await runChargeCheck(
       sunsynk as unknown as never,
@@ -280,7 +280,8 @@ describe('runChargeCheck', () => {
     );
 
     expect(sunsynk.updateSettings).not.toHaveBeenCalled();
-    expect(appState.controlMode).toBe('charging');
+    // SoC unavailable → do not force charge; not overnight → discharging.
+    expect(appState.controlMode).toBe('discharging');
     jest.useRealTimers();
   });
 
@@ -290,7 +291,7 @@ describe('runChargeCheck', () => {
     jest.setSystemTime(fixedDate);
 
     const { sunsynk, octopus } = makeMocks(30);
-    octopus.getDispatchSlots.mockResolvedValue([]);
+    octopus.getPlannedDispatchSlots.mockResolvedValue([]);
 
     await runChargeCheck(
       sunsynk as unknown as never,
@@ -313,7 +314,7 @@ describe('runChargeCheck', () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-03T10:00:00'));
     const morning = makeMocks(soc);
-    morning.octopus.getDispatchSlots.mockResolvedValue([
+    morning.octopus.getPlannedDispatchSlots.mockResolvedValue([
       makeSlot('2026-01-03T09:30:00', '2026-01-03T11:00:00'),
     ]);
     await runChargeCheck(
@@ -330,7 +331,7 @@ describe('runChargeCheck', () => {
     jest.useFakeTimers();
     jest.setSystemTime(new Date('2026-01-03T20:00:00'));
     const evening = makeMocks(soc);
-    evening.octopus.getDispatchSlots.mockResolvedValue([
+    evening.octopus.getPlannedDispatchSlots.mockResolvedValue([
       makeSlot('2026-01-03T19:30:00', '2026-01-03T21:00:00'),
     ]);
     await runChargeCheck(

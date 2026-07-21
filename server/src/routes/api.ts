@@ -6,7 +6,7 @@ import { appState } from '../state';
 import { SunsynkService } from '../services/sunsynk';
 import { OctopusService } from '../services/octopus';
 import { runChargeCheck } from '../jobs/chargeScheduler';
-import { yesterdaySlots } from '../services/slotHistory';
+import { buildSlotView, yesterdaySlots } from '../services/slotHistory';
 
 export function createRouter(
   sunsynk: SunsynkService,
@@ -25,15 +25,26 @@ export function createRouter(
     res.json({ slots: appState.chargeSlots, isInChargeSlot: appState.isInChargeSlot });
   });
 
-  /** GET /api/slot-history – in-memory charge slot history */
-  router.get('/slot-history', (_req: Request, res: Response) => {
-    const nowIso = new Date().toISOString();
-    res.json({
-      fulfilled: appState.slotHistory.fulfilled,
-      yesterday: yesterdaySlots(appState.slotHistory, nowIso),
-      active: appState.slotHistory.active,
-      futurePlanned: appState.slotHistory.futurePlanned,
-    });
+  /** GET /api/slot-history – charge slots derived live from Octopus */
+  router.get('/slot-history', async (_req: Request, res: Response) => {
+    try {
+      const nowIso = new Date().toISOString();
+      const [planned, completed] = await Promise.all([
+        octopus.getPlannedDispatchSlots(),
+        octopus.getCompletedDispatchSlots(),
+      ]);
+      const view = buildSlotView(planned, completed, nowIso);
+      res.json({
+        fulfilled: view.fulfilled,
+        yesterday: yesterdaySlots(view, nowIso),
+        active: view.active,
+        futurePlanned: view.futurePlanned,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error('[API] /api/slot-history failed:', message);
+      res.status(500).json({ ok: false, error: message });
+    }
   });
 
   /** GET /api/settings – saved (startup) and current inverter settings */

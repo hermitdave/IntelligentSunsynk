@@ -42,6 +42,18 @@ const ALLOWED_WRITE_SETTINGS = new Set([
   'cap1', 'cap2', 'cap3', 'cap4', 'cap5', 'cap6',
 ]);
 
+/**
+ * Time-of-use slot boundaries that must always frame the off-peak window
+ * (23:30 -> 05:30). The charge scheduler assumes the inverter's Use Timer
+ * slots line up with this window, so these boundaries are validated on every
+ * read and re-asserted on every write to keep the inverter in step.
+ */
+const REQUIRED_OFF_PEAK_SELL_TIMES: Record<string, string> = {
+  sellTime1: '00:00',
+  sellTime2: '05:30',
+  sellTime6: '23:30',
+};
+
 export class SunsynkService {
   private config: Config;
   private client: AxiosInstance;
@@ -425,9 +437,57 @@ export class SunsynkService {
   // Inverter settings
   // ===========================================================================
 
+  /**
+   * Normalise a SunSynk "HH:MM" time-of-day value for comparison.
+   * Accepts unpadded hours (e.g. "0:00") and returns zero-padded "HH:MM",
+   * or null if the value is missing/unparseable.
+   */
+  private normalizeTimeOfDay(value: string | undefined): string | null {
+    if (!value) return null;
+    const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+    if (!match) return null;
+    const hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    if (hours > 23 || minutes > 59) return null;
+    return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+  }
+
+  /**
+   * Ensure the off-peak slot boundaries on the inverter match the required
+   * window (see REQUIRED_OFF_PEAK_SELL_TIMES). If any have drifted, correct
+   * them on the inverter and return the settings with the corrected values.
+   */
+  private async ensureOffPeakBoundaries(
+    serial: string,
+    settings: InverterSettings,
+  ): Promise<InverterSettings> {
+    const corrections: Record<string, string> = {};
+
+    for (const [key, expected] of Object.entries(REQUIRED_OFF_PEAK_SELL_TIMES)) {
+      if (this.normalizeTimeOfDay(settings[key]) !== expected) {
+        corrections[key] = expected;
+        console.warn(
+          '[SunsynkService] ' + key + ' is "' + (settings[key] ?? 'unset') +
+          '", expected "' + expected + '" for the 23:30-05:30 off-peak window; correcting.',
+        );
+      }
+    }
+
+    if (!Object.keys(corrections).length) {
+      return settings;
+    }
+
+    await this.request('POST', '/api/v1/common/setting/' + serial + '/set', corrections);
+    return { ...settings, ...corrections };
+  }
+
   /** Read all current inverter settings. */
   async getSettings(serial: string): Promise<InverterSettings> {
-    return this.request<InverterSettings>('GET', '/api/v1/common/setting/' + serial + '/read');
+    const settings = await this.request<InverterSettings>(
+      'GET',
+      '/api/v1/common/setting/' + serial + '/read',
+    );
+    return this.ensureOffPeakBoundaries(serial, settings);
   }
 
   /**
@@ -435,9 +495,24 @@ export class SunsynkService {
    * Only settings in the ALLOWED_WRITE_SETTINGS whitelist are sent.
    */
   async updateSettings(serial: string, settings: Partial<InverterSettings>): Promise<void> {
+    // Re-assert the off-peak slot boundaries on every write so the inverter
+    // never drifts out of the required 23:30-05:30 window. A caller supplying a
+    // conflicting value is overridden and warned rather than silently obeyed.
+    const settingsToWrite: Partial<InverterSettings> = { ...settings };
+    for (const [key, expected] of Object.entries(REQUIRED_OFF_PEAK_SELL_TIMES)) {
+      const provided = settingsToWrite[key];
+      if (provided !== undefined && this.normalizeTimeOfDay(provided) !== expected) {
+        console.warn(
+          '[SunsynkService] Overriding ' + key + '="' + provided +
+          '" with required off-peak boundary "' + expected + '".',
+        );
+      }
+      settingsToWrite[key] = expected;
+    }
+
     const safeSettings: Record<string, string> = {};
 
-    for (const [key, value] of Object.entries(settings)) {
+    for (const [key, value] of Object.entries(settingsToWrite)) {
       if (!ALLOWED_WRITE_SETTINGS.has(key)) {
         console.warn('[SunsynkService] Skipping non-whitelisted setting: ' + key);
         continue;

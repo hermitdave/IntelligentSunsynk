@@ -100,6 +100,12 @@ export function ChargeSlots({ slots, isInChargeSlot, slotHistory }: ChargeSlotsP
       {slotHistory && (
         <div className="slot-history">
           <SlotSection
+            title="⚡ Currently Active"
+            slots={slotHistory.active}
+            badgeClass="badge-active-small"
+            statusLabel="Active"
+          />
+          <SlotSection
             title="✅ Fulfilled Slots"
             slots={slotHistory.fulfilled}
             badgeClass="badge-fulfilled"
@@ -110,12 +116,6 @@ export function ChargeSlots({ slots, isInChargeSlot, slotHistory }: ChargeSlotsP
             slots={slotHistory.yesterday}
             badgeClass="badge-past"
             statusLabel="Yesterday"
-          />
-          <SlotSection
-            title="⚡ Currently Active"
-            slots={slotHistory.active}
-            badgeClass="badge-active-small"
-            statusLabel="Active"
           />
           <SlotSection
             title="📆 Upcoming Planned Slots"

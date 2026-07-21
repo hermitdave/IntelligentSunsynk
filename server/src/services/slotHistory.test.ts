@@ -143,6 +143,22 @@ describe('yesterdaySlots', () => {
     expect(result[0].fingerprint).toBe('a');
   });
 
+  it('includes a slot that started yesterday but ended after midnight', () => {
+    // Local-time strings (no 'Z') so the local calendar-day logic is
+    // independent of the machine timezone.
+    const history: SlotHistory = {
+      fulfilled: [
+        // Starts 2026-01-02 23:30 (yesterday), ends 2026-01-03 00:00 (today).
+        { ...makeSlot('2026-01-02T23:30:00', '2026-01-03T00:00:00'), fingerprint: 'midnight', status: 'fulfilled', firstSeen: '2026-01-02T23:30:00', lastSeen: '2026-01-03T00:00:00' },
+      ],
+      active: [],
+      futurePlanned: [],
+    };
+    const result = yesterdaySlots(history, '2026-01-03T12:00:00');
+    expect(result).toHaveLength(1);
+    expect(result[0].fingerprint).toBe('midnight');
+  });
+
   it('returns empty array when no slots ended yesterday', () => {
     const history: SlotHistory = {
       fulfilled: [

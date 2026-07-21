@@ -79,8 +79,9 @@ export function buildSlotView(
 }
 
 /**
- * Filter fulfilled slots to those whose end time fell on the previous
- * calendar day (relative to `nowIso`), in the server's local timezone.
+ * Filter fulfilled slots to those whose start time fell on the previous
+ * calendar day (relative to `nowIso`), in the server's local timezone — i.e.
+ * every slot that started yesterday, including one that ran past midnight.
  */
 export function yesterdaySlots(history: SlotHistory, nowIso: string): TrackedSlot[] {
   const now = new Date(nowIso);
@@ -90,7 +91,7 @@ export function yesterdaySlots(history: SlotHistory, nowIso: string): TrackedSlo
   const yEnd = yStart + 24 * 60 * 60 * 1000;
 
   return history.fulfilled.filter((s) => {
-    const end = new Date(s.end).getTime();
-    return end >= yStart && end < yEnd;
+    const start = new Date(s.start).getTime();
+    return start >= yStart && start < yEnd;
   });
 }

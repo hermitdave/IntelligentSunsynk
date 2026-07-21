@@ -32,7 +32,24 @@ interface PlannedDispatchResponse {
     plannedDispatches?: Array<{
       startDt: string;
       endDt: string;
-      delta: number | null;
+      // Octopus returns delta as a string (e.g. "-21.08"), sometimes a number.
+      delta: number | string | null;
+      meta?: {
+        source?: string;
+        location?: string;
+      };
+    }>;
+  };
+  errors?: Array<{ message: string }>;
+}
+
+interface CompletedDispatchResponse {
+  data?: {
+    completedDispatches?: Array<{
+      startDt: string;
+      endDt: string;
+      // Octopus returns delta as a string (e.g. "-21.08"), sometimes a number.
+      delta: number | string | null;
       meta?: {
         source?: string;
         location?: string;
@@ -104,17 +121,17 @@ export class OctopusService {
   }
 
   // ===========================================================================
-  // Dispatch slots
+  // Planned dispatch slots
   // ===========================================================================
 
   /**
-   * Fetch Intelligent Go planned dispatch slots for the configured account.
+   * Fetch Planned Intelligent Go planned dispatch slots for the configured account.
    *
    * Returns all upcoming slots where Octopus schedules cheap-rate EV charging.
    * The inverter should switch to charging mode during these windows to avoid
    * draining the home battery while the EV charges from the grid.
    */
-  async getDispatchSlots(): Promise<DispatchSlot[]> {
+  async getPlannedDispatchSlots(): Promise<DispatchSlot[]> {
     if (!this.config.octopusAccountId) {
       throw new Error('OCTOPUS_ACCOUNT_ID is not configured');
     }
@@ -122,7 +139,7 @@ export class OctopusService {
     const token = await this.getKrakenToken();
 
     const query = `
-      query getDispatches($accountNumber: String!) {
+      query getPlannedDispatches($accountNumber: String!) {
         plannedDispatches(accountNumber: $accountNumber) {
           startDt
           endDt
@@ -163,11 +180,93 @@ export class OctopusService {
       const startIso = slot.startDt.replace(' ', 'T');
       const endIso = slot.endDt.replace(' ', 'T');
 
+      const delta =
+        typeof slot.delta === 'number'
+          ? slot.delta
+          : typeof slot.delta === 'string'
+            ? parseFloat(slot.delta)
+            : NaN;
+
       return {
         start: startIso,
         end: endIso,
         source: slot.meta?.source ?? 'smart-charge',
-        deltaKwh: typeof slot.delta === 'number' ? slot.delta : 0,
+        deltaKwh: Number.isFinite(delta) ? delta : 0,
+        location: slot.meta?.location ?? null,
+      };
+    });
+  }
+
+  // ===========================================================================
+  // Completed dispatch slots
+  // ===========================================================================
+
+  /**
+   * Fetch Completed Intelligent Go planned dispatch slots for the configured account.
+   *
+   * Returns slots where Octopus scheduled cheap-rate EV charging.
+   */
+  async getCompletedDispatchSlots(): Promise<DispatchSlot[]> {
+    if (!this.config.octopusAccountId) {
+      throw new Error('OCTOPUS_ACCOUNT_ID is not configured');
+    }
+
+    const token = await this.getKrakenToken();
+
+    const query = `
+      query getCompletedDispatches($accountNumber: String!) {
+        completedDispatches(accountNumber: $accountNumber) {
+          startDt
+          endDt
+          delta
+          meta {
+            source
+            location
+          }
+        }
+      }
+    `;
+
+    const response = await axios.post<CompletedDispatchResponse>(
+      OCTOPUS_GRAPHQL_URL,
+      {
+        query,
+        variables: { accountNumber: this.config.octopusAccountId },
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: token,
+        },
+        timeout: 30_000,
+      },
+    );
+
+    if (response.data.errors?.length) {
+      throw new Error(
+        'Octopus dispatch query error: ' + response.data.errors.map((e) => e.message).join(', '),
+      );
+    }
+
+    const completed = response.data?.data?.completedDispatches ?? [];
+
+    return completed.map((slot): DispatchSlot => {
+      // Octopus returns format "2026-01-02 20:30:00+00:00" – normalise to ISO 8601
+      const startIso = slot.startDt.replace(' ', 'T');
+      const endIso = slot.endDt.replace(' ', 'T');
+
+      const delta =
+        typeof slot.delta === 'number'
+          ? slot.delta
+          : typeof slot.delta === 'string'
+            ? parseFloat(slot.delta)
+            : NaN;
+
+      return {
+        start: startIso,
+        end: endIso,
+        source: slot.meta?.source ?? 'smart-charge',
+        deltaKwh: Number.isFinite(delta) ? delta : 0,
         location: slot.meta?.location ?? null,
       };
     });

@@ -15,12 +15,6 @@ export const appState: AppState = {
   currentSettings: null,
   chargeSlots: [],
   isInChargeSlot: false,
-  slotHistory: {
-    fulfilled: [],
-    futurePlanned: [],
-    active: [],
-    removed: [],
-  },
   socThresholdSchedule: parseSocThresholdSchedule(DEFAULT_SOC_THRESHOLD_SCHEDULE),
   controlMode: 'unknown',
   lastUpdated: null,

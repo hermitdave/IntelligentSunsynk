@@ -24,7 +24,6 @@ export interface SlotHistory {
   yesterday: TrackedSlot[];
   active: TrackedSlot[];
   futurePlanned: TrackedSlot[];
-  removed: TrackedSlot[];
 }
 
 export type ControlMode = 'charging' | 'discharging' | 'unknown';

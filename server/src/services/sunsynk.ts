@@ -506,13 +506,15 @@ export class SunsynkService {
   }
 
   /**
-   * Read battery state of charge (SoC) from the plant overview.
+   * Read battery state of charge (SoC) from the plant energy-flow endpoint.
    * Returns SoC as a percentage (0-100), or null if not available.
+   *
+   * NOTE: the plant *overview* endpoint does NOT include SoC — it lives in the
+   * `energy/flow` payload as `soc`.
    */
   async getBatterySoC(plantId: number): Promise<number | null> {
-    const overview = await this.getPlantOverview(plantId);
-    // The SunSynk API typically returns battery SoC as 'soc' or 'batterySoc' in the overview
-    const soc = (overview as Record<string, unknown>).soc ?? (overview as Record<string, unknown>).batterySoc;
+    const flow = await this.getPlantEnergyFlow(plantId);
+    const soc = (flow as Record<string, unknown>).soc;
     if (typeof soc === 'number') {
       return soc;
     }

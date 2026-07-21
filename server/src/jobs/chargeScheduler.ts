@@ -5,9 +5,7 @@
  *
  * Each tick:
  *  1. Fetches upcoming Intelligent Go dispatch slots from Octopus.
- *  2. Checks whether the current time falls within any active slot, using the
- *     merged history so a dispatch that has dropped out of Octopus's planned
- *     list (which happens when it activates) still counts as active.
+ *  2. Checks whether the current local time falls within any active slot.
  *  3. Between 23:30 and 05:30 local time, always sets peakAndVallery = "1"
  *     (Use Timer enabled).
  *  4. If inside a slot outside that overnight window, and battery SoC is below
@@ -22,14 +20,13 @@ import cron from 'node-cron';
 import { Config } from '../config';
 import { SunsynkService } from '../services/sunsynk';
 import { OctopusService } from '../services/octopus';
-import { loadSlotHistory, mergeSlots, saveSlotHistory } from '../services/slotHistory';
 import { appState } from '../state';
 import { DispatchSlot, SocThreshold } from '../types';
 
 /** Value written to peakAndVallery when inside a charge slot. */
 const PEAK_VALLEY_CHARGING = '0';
-/** Value written to peakAndVallery when outside a charge slot. */
-const PEAK_VALLEY_NORMAL = '1';
+/** Value written to peakAndVallery when outside a charge slot (Use Timer enabled). */
+export const PEAK_VALLEY_NORMAL = '1';
 const OVERNIGHT_START_MINUTES = 23 * 60 + 30;
 const OVERNIGHT_END_MINUTES = 5 * 60 + 30;
 /** Fallback SoC threshold used only if the schedule is somehow empty. */
@@ -113,37 +110,23 @@ export async function runChargeCheck(
     schedulerLog('Running charge check...');
 
     // --- Step 1: Fetch dispatch slots from Octopus ---
-    const slots = await octopus.getDispatchSlots();
+    const slots = await octopus.getPlannedDispatchSlots();
     appState.chargeSlots = slots;
 
-    // --- Step 2: Merge slots into persisted history (window-aware) ---
+    // --- Step 2: Check if we are currently in a charge slot ---
     const now = new Date();
-    const nowIso = now.toISOString();
-    // Whether the *fresh* Octopus list shows us in a slot. This is unreliable
-    // on its own: `plannedDispatches` drops a dispatch the moment it activates,
-    // so a slot can vanish from this list while it is still charging.
-    const inSlotFresh = isInChargeSlot(now, slots);
-    appState.slotHistory = mergeSlots(slots, appState.slotHistory, nowIso, inSlotFresh);
-    saveSlotHistory(appState.slotHistory);
-
-    // --- Step 2b: Authoritative "in charge slot" signal ---
-    // Derive it from the merged history's active bucket, which keeps a slot
-    // active for its whole [start, end) window even after Octopus drops it from
-    // plannedDispatches. This prevents the inverter from being switched out of
-    // charge mode mid-dispatch.
-    const inSlot = appState.slotHistory.active.length > 0;
+    const inSlot = isInChargeSlot(now, slots);
     appState.isInChargeSlot = inSlot;
-    if (inSlot && !inSlotFresh) {
-      schedulerLog(
-        'Active slot no longer present in Octopus plannedDispatches ' +
-        '(dispatch has activated) — holding charge mode from tracked history',
-      );
-    }
 
-    // --- Step 3: Get battery SoC (only needed when in a charge slot) ---
+    const inOvernightWindow = isOvernightTimerWindow(now);
+    const localMinutes = now.getHours() * 60 + now.getMinutes();
+    const socThreshold = socThresholdForMinutes(localMinutes, appState.socThresholdSchedule);
+
+    // --- Step 3: Get battery SoC. Only needed to gate charging during a
+    // peak-hour smart-charge slot; the overnight window never checks SoC. ---
     let batterySoC: number | null = null;
     const plantId = appState.plantId;
-    if (inSlot && plantId !== null) {
+    if (inSlot && !inOvernightWindow && plantId !== null) {
       try {
         batterySoC = await sunsynk.getBatterySoC(plantId);
         schedulerLog('Battery SoC: ' + (batterySoC !== null ? batterySoC + '%' : 'unavailable'));
@@ -153,33 +136,23 @@ export async function runChargeCheck(
       }
     }
 
-    const inOvernightWindow = isOvernightTimerWindow(now);
-    const localMinutes = now.getHours() * 60 + now.getMinutes();
-    const socThreshold = socThresholdForMinutes(localMinutes, appState.socThresholdSchedule);
-
     // Determine desired peakAndVallery value:
-    // - During overnight window (23:30-05:30): always use normal mode (1)
-    // - Inside a charge slot: only disable peak/valley (0) if battery SoC is
-    //   below the time-of-day threshold (see SOC_THRESHOLD_SCHEDULE)
-    // - Outside a charge slot: use normal mode (1)
+    // - Overnight window (23:30-05:30): keep Use Timer enabled (1). The
+    //   overnight tariff charges the battery via the inverter's timer schedule.
+    // - Peak-hour smart-charge slot with battery SoC below the time-of-day
+    //   threshold: disable Use Timer (0) to force grid charging.
+    // - Otherwise: Use Timer enabled (1).
     let desiredValue: string;
     if (inOvernightWindow) {
+      desiredValue = PEAK_VALLEY_NORMAL;
+    } else if (inSlot && batterySoC !== null && batterySoC < socThreshold) {
       desiredValue = PEAK_VALLEY_CHARGING;
-    } else if (inSlot) {
-      // Only disable peak/valley if battery SoC is below the current threshold
-      if (batterySoC !== null && batterySoC < socThreshold) {
-        desiredValue = PEAK_VALLEY_CHARGING;
-        schedulerLog('In charge slot with battery SoC ' + batterySoC + '% < ' + socThreshold + '% threshold, disabling peak/valley');
-      } else {
-        desiredValue = PEAK_VALLEY_NORMAL;
-        if (batterySoC !== null) {
-          schedulerLog('In charge slot but battery SoC ' + batterySoC + '% >= ' + socThreshold + '% threshold, keeping peak/valley enabled');
-        } else {
-          schedulerLog('In charge slot but battery SoC unavailable, keeping peak/valley enabled');
-        }
-      }
+      schedulerLog('Peak-hour charge slot with battery SoC ' + batterySoC + '% < ' + socThreshold + '% threshold, disabling Use Timer to charge');
     } else {
       desiredValue = PEAK_VALLEY_NORMAL;
+      if (inSlot && batterySoC !== null) {
+        schedulerLog('Peak-hour charge slot but battery SoC ' + batterySoC + '% >= ' + socThreshold + '% threshold, keeping Use Timer enabled');
+      }
     }
 
     const currentValue = appState.currentSettings?.peakAndVallery;
@@ -218,7 +191,10 @@ export async function runChargeCheck(
       schedulerLog('No change needed (Use Timer already ' + formatBoolean(desiredUseTimer) + ')');
     }
 
-    appState.controlMode = (inSlot && currentUseTimer) || inOvernightWindow ? 'charging' : 'discharging';
+    // Charging whenever the overnight timer is running or we forced grid
+    // charging (peakAndVallery = "0") during a peak-hour slot.
+    appState.controlMode =
+      inOvernightWindow || desiredValue === PEAK_VALLEY_CHARGING ? 'charging' : 'discharging';
     appState.lastUpdated = new Date().toISOString();
     appState.lastError = null;
     appState.runCount += 1;
@@ -255,14 +231,7 @@ export function startScheduler(
       .join(', '),
   );
 
-  // Load persisted slot history so fulfilled slots survive restarts
-  appState.slotHistory = loadSlotHistory();
-  schedulerLog(
-    'Loaded slot history: ' +
-    appState.slotHistory.fulfilled.length + ' fulfilled, ' +
-    appState.slotHistory.active.length + ' active, ' +
-    appState.slotHistory.futurePlanned.length + ' future planned',
-  );
+  // Slot history is tracked in memory only and rebuilt from Octopus each run.
 
   // Immediate first run
   runChargeCheck(sunsynk, octopus, serial).catch((err) =>

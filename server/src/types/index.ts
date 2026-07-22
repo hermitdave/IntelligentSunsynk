@@ -158,20 +158,6 @@ export interface SlotHistory {
 
 export type ControlMode = 'charging' | 'discharging' | 'unknown';
 
-/**
- * One entry in the time-of-day battery SoC threshold schedule.
- *
- * `startMinutes` is minutes-past-local-midnight (0-1439) at which this
- * threshold begins to apply; it stays in effect until the next entry's start
- * time, wrapping around midnight for the last entry of the day. `threshold` is
- * the battery SoC percentage below which grid charging (peakAndVallery = "0")
- * is engaged while inside a dispatch slot.
- */
-export interface SocThreshold {
-  startMinutes: number;
-  threshold: number;
-}
-
 export interface AppState {
   /** Whether we have a valid Sunsynk API token */
   isAuthenticated: boolean;
@@ -187,8 +173,6 @@ export interface AppState {
   chargeSlots: DispatchSlot[];
   /** Whether the current time is within an active dispatch slot */
   isInChargeSlot: boolean;
-  /** Time-of-day battery SoC thresholds for grid charging, sorted by start. */
-  socThresholdSchedule: SocThreshold[];
   /** Current control mode applied to the inverter */
   controlMode: ControlMode;
   /** ISO timestamp of last successful scheduler run */

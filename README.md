@@ -8,7 +8,7 @@ When Octopus schedules your EV to charge from the grid during peak hours, your h
 
 1. **Fetches** upcoming Intelligent Go dispatch slots from the Octopus Energy GraphQL API.
 2. **Checks** every 5 minutes (configurable) whether the current time is within an active slot.
-3. **Sets** the inverter's `peakAndVallery` ("Use Timer") to `"1"` from **23:30 to 05:30**, and outside that window sets `"0"` during an active slot (to prevent battery drain) or `"1"` when no slot is active.
+3. **Sets** the inverter's `peakAndVallery` ("Use Timer") to `"1"` from **23:30 to 05:30** so the overnight tariff charges the battery. Outside that window, during an active slot it alternates every 5 minutes between charging (`"0"`, grid charge) and discharging (`"1"`) so the battery SoC is held roughly where the slot began; when no slot is active it stays at `"1"`.
 4. **Shows** a live dashboard with the current inverter state, all upcoming slots, and the settings snapshot.
 
 ## Architecture
@@ -93,7 +93,6 @@ npm run start:server     # Serves the API + built React app at http://localhost:
 | `SUNSYNK_VERIFY_SSL` | Optional | `true`/`false` (default `false`, recommended by SunSynk) |
 | `OCTOPUS_API_KEY` | ✅ | Octopus Energy REST API key |
 | `OCTOPUS_ACCOUNT_ID` | ✅ | Octopus account number (e.g. `A-XXXXXXXX`) |
-| `SOC_THRESHOLD_SCHEDULE` | ✅ | Time and Battery SoC levels |
 | `WEB_HOST` | Optional | Server bind address (default `0.0.0.0`) |
 | `WEB_PORT` | Optional | Server port (default `8080`) |
 | `CRON_SCHEDULE` | Optional | Cron expression (default `*/5 * * * *`) |

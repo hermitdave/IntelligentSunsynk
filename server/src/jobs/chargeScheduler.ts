@@ -112,9 +112,39 @@ export async function runChargeCheck(
     // --- Step 2: Check if we are currently in a charge slot ---
     const now = new Date();
     const inSlot = isInChargeSlot(now, slots);
+    const wasInSlot = appState.isInChargeSlot;
     appState.isInChargeSlot = inSlot;
 
     const inOvernightWindow = isOvernightTimerWindow(now);
+    const wasInOvernightWindow = appState.isInOvernightWindow;
+    appState.isInOvernightWindow = inOvernightWindow;
+
+    // A charge slot or the overnight window (23:30/05:30 edges) just started or
+    // ended on this tick. At these boundaries the inverter may have changed
+    // peakAndVallery on its own (its internal Use Timer schedule), so the
+    // cached snapshot can't be trusted.
+    const atSlotBoundary = inSlot !== wasInSlot;
+    const atOvernightBoundary = inOvernightWindow !== wasInOvernightWindow;
+
+    // Re-read settings from the inverter at these boundaries so the change
+    // detection below compares against the device's real state, not a stale
+    // local cache that could cause a needed write to be skipped.
+    if (atSlotBoundary || atOvernightBoundary) {
+      const reasons: string[] = [];
+      if (atSlotBoundary) reasons.push('slot ' + (inSlot ? 'entered' : 'exited'));
+      if (atOvernightBoundary) reasons.push('overnight window ' + (inOvernightWindow ? 'entered' : 'exited'));
+      try {
+        appState.currentSettings = await sunsynk.getSettings(serial);
+        schedulerLog(
+          'Boundary (' + reasons.join(', ') +
+          '): re-read inverter settings, peakAndVallery=' +
+          (appState.currentSettings.peakAndVallery ?? 'unknown'),
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        schedulerLog('Failed to re-read settings at boundary: ' + message + ' (using cached snapshot)');
+      }
+    }
 
     // Determine desired peakAndVallery value:
     // - Overnight window (23:30-05:30): keep Use Timer enabled (1). The

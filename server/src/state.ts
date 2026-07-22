@@ -14,6 +14,7 @@ export const appState: AppState = {
   currentSettings: null,
   chargeSlots: [],
   isInChargeSlot: false,
+  isInOvernightWindow: false,
   controlMode: 'unknown',
   lastUpdated: null,
   lastError: null,

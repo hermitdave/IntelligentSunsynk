@@ -173,6 +173,8 @@ export interface AppState {
   chargeSlots: DispatchSlot[];
   /** Whether the current time is within an active dispatch slot */
   isInChargeSlot: boolean;
+  /** Whether the current time is within the 23:30-05:30 overnight timer window */
+  isInOvernightWindow: boolean;
   /** Current control mode applied to the inverter */
   controlMode: ControlMode;
   /** ISO timestamp of last successful scheduler run */

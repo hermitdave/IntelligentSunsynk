@@ -122,6 +122,7 @@ function resetAppState(): void {
   appState.currentSettings = { peakAndVallery: '1' };
   appState.chargeSlots = [];
   appState.isInChargeSlot = false;
+  appState.isInOvernightWindow = false;
   appState.controlMode = 'unknown';
   appState.lastError = null;
   appState.runCount = 0;
@@ -237,6 +238,104 @@ describe('runChargeCheck', () => {
     expect(sunsynk.getBatterySoC).not.toHaveBeenCalled();
     expect(sunsynk.updateSettings).not.toHaveBeenCalled();
     expect(appState.controlMode).toBe('discharging');
+    jest.useRealTimers();
+  });
+
+  it('re-reads inverter state on slot exit and corrects a drifted value the stale cache would have hidden', async () => {
+    // Slot just ended (was in slot, now no active slot), outside overnight.
+    const fixedDate = new Date('2026-01-03T14:00:00');
+    jest.useFakeTimers();
+    jest.setSystemTime(fixedDate);
+
+    const { sunsynk, octopus } = makeMocks();
+    octopus.getPlannedDispatchSlots.mockResolvedValue([]);
+    appState.isInChargeSlot = true; // previous tick was inside a slot
+    // Local cache wrongly believes the inverter is already at "1" (desired
+    // outside a slot). Without a re-read the write would be skipped, leaving
+    // the inverter stuck where it actually is: "0".
+    appState.currentSettings = { peakAndVallery: '1' };
+    sunsynk.getSettings.mockResolvedValue({ peakAndVallery: '0' });
+
+    await runChargeCheck(
+      sunsynk as unknown as never,
+      octopus as unknown as never,
+      'TEST-SERIAL',
+    );
+
+    // Boundary re-read happened, exposing the drift, so we write "1".
+    expect(sunsynk.getSettings).toHaveBeenCalledWith('TEST-SERIAL');
+    expect(sunsynk.updateSettings).toHaveBeenCalledWith('TEST-SERIAL', { peakAndVallery: '1' });
+    jest.useRealTimers();
+  });
+
+  it('re-reads inverter state on entering the overnight window and corrects a drifted value', async () => {
+    // 23:35 local -> just entered the 23:30-05:30 overnight window, no slot.
+    const fixedDate = new Date('2026-01-03T23:35:00');
+    jest.useFakeTimers();
+    jest.setSystemTime(fixedDate);
+
+    const { sunsynk, octopus } = makeMocks();
+    octopus.getPlannedDispatchSlots.mockResolvedValue([]);
+    appState.isInOvernightWindow = false; // previous tick was outside the window
+    // Cache wrongly believes the inverter is already at "1"; it drifted to "0".
+    appState.currentSettings = { peakAndVallery: '1' };
+    sunsynk.getSettings.mockResolvedValue({ peakAndVallery: '0' });
+
+    await runChargeCheck(
+      sunsynk as unknown as never,
+      octopus as unknown as never,
+      'TEST-SERIAL',
+    );
+
+    expect(sunsynk.getSettings).toHaveBeenCalledWith('TEST-SERIAL');
+    expect(sunsynk.updateSettings).toHaveBeenCalledWith('TEST-SERIAL', { peakAndVallery: '1' });
+    expect(appState.controlMode).toBe('charging');
+    jest.useRealTimers();
+  });
+
+  it('does not re-read inverter state mid-window when no boundary was crossed', async () => {
+    // 02:00 local, already inside the overnight window on the previous tick.
+    const fixedDate = new Date('2026-01-03T02:00:00');
+    jest.useFakeTimers();
+    jest.setSystemTime(fixedDate);
+
+    const { sunsynk, octopus } = makeMocks();
+    octopus.getPlannedDispatchSlots.mockResolvedValue([]);
+    appState.isInOvernightWindow = true; // no boundary this tick
+    appState.currentSettings = { peakAndVallery: '1' }; // already correct
+
+    await runChargeCheck(
+      sunsynk as unknown as never,
+      octopus as unknown as never,
+      'TEST-SERIAL',
+    );
+
+    expect(sunsynk.getSettings).not.toHaveBeenCalled();
+    expect(sunsynk.updateSettings).not.toHaveBeenCalled();
+    jest.useRealTimers();
+  });
+
+  it('does not re-read inverter state mid-slot when no slot boundary was crossed', async () => {
+    // 12:05 charge phase, already inside the slot on the previous tick.
+    const fixedDate = new Date('2026-01-03T12:05:00');
+    jest.useFakeTimers();
+    jest.setSystemTime(fixedDate);
+
+    const slot = makeSlot('2026-01-03T11:00:00', '2026-01-03T13:00:00');
+    const { sunsynk, octopus } = makeMocks();
+    octopus.getPlannedDispatchSlots.mockResolvedValue([slot]);
+    appState.isInChargeSlot = true; // no boundary this tick
+    appState.currentSettings = { peakAndVallery: '0' }; // already charging
+
+    await runChargeCheck(
+      sunsynk as unknown as never,
+      octopus as unknown as never,
+      'TEST-SERIAL',
+    );
+
+    // No boundary and no write -> no extra GET against the inverter.
+    expect(sunsynk.getSettings).not.toHaveBeenCalled();
+    expect(sunsynk.updateSettings).not.toHaveBeenCalled();
     jest.useRealTimers();
   });
 });

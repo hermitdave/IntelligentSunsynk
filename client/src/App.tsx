@@ -9,7 +9,7 @@ import { SettingsView } from './components/SettingsView';
 import { PortalDataView } from './components/PortalDataView';
 import './App.css';
 
-const POLL_INTERVAL_MS = 30_000; // Auto-refresh every 30 seconds
+const POLL_INTERVAL_MS = 5 * 60_000; // Auto-refresh every 5 minutes
 
 function normalizeKey(key: string): string {
   return key.replace(/[^a-z0-9]/gi, '').toLowerCase();
@@ -158,11 +158,27 @@ export default function App() {
     setHasLoadedPortalData(true);
   }, [activeTab, hasLoadedPortalData, loadPortalData, powerGraphDate]);
 
-  // Auto-poll every 30s
+  // Auto-poll every 5 minutes
   useEffect(() => {
     pollerRef.current = setInterval(loadStatus, POLL_INTERVAL_MS);
     return () => {
       if (pollerRef.current) clearInterval(pollerRef.current);
+    };
+  }, [loadStatus]);
+
+  // Refresh immediately when the tab/window becomes active again, so returning
+  // to a backgrounded tab shows fresh data instead of waiting for the next poll.
+  useEffect(() => {
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void loadStatus();
+      }
+    };
+    document.addEventListener('visibilitychange', refreshIfVisible);
+    window.addEventListener('focus', refreshIfVisible);
+    return () => {
+      document.removeEventListener('visibilitychange', refreshIfVisible);
+      window.removeEventListener('focus', refreshIfVisible);
     };
   }, [loadStatus]);
 
@@ -268,7 +284,7 @@ export default function App() {
       </main>
 
       <footer className="app-footer">
-        <p>Auto-refreshes every 30 seconds · {state ? `Last poll: ${new Date().toLocaleTimeString()}` : 'Waiting…'}</p>
+        <p>Auto-refreshes every 5 minutes · {state ? `Last poll: ${new Date().toLocaleTimeString()}` : 'Waiting…'}</p>
       </footer>
     </div>
   );

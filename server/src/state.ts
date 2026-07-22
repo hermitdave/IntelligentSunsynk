@@ -5,7 +5,6 @@
  * and the latest Octopus dispatch slots.
  */
 import { AppState } from './types';
-import { DEFAULT_SOC_THRESHOLD_SCHEDULE, parseSocThresholdSchedule } from './config';
 
 export const appState: AppState = {
   isAuthenticated: false,
@@ -15,7 +14,6 @@ export const appState: AppState = {
   currentSettings: null,
   chargeSlots: [],
   isInChargeSlot: false,
-  socThresholdSchedule: parseSocThresholdSchedule(DEFAULT_SOC_THRESHOLD_SCHEDULE),
   controlMode: 'unknown',
   lastUpdated: null,
   lastError: null,
